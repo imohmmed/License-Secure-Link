@@ -271,16 +271,20 @@ export async function registerRoutes(
     const hwid = license.hardwareId || server.hardwareId;
     if (!hwid) return res.status(400).json({ message: "لا يوجد Hardware ID - اختبر الاتصال بالسيرفر أولاً" });
 
+    const deployStatus = license.status === "inactive" ? "active" : license.status;
     const result = await deployLicenseToServer(
       server.host, server.port, server.username, server.password,
       hwid, license.licenseId,
       new Date(license.expiresAt), license.maxUsers, license.maxSites,
-      license.status, getBaseUrl(req)
+      deployStatus, getBaseUrl(req)
     );
 
     if (result.success) {
-      if (!license.hardwareId) {
-        await storage.updateLicense(req.params.id, { hardwareId: hwid });
+      const updates: any = {};
+      if (!license.hardwareId) updates.hardwareId = hwid;
+      if (license.status === "inactive") updates.status = "active";
+      if (Object.keys(updates).length > 0) {
+        await storage.updateLicense(req.params.id, updates);
       }
 
       await storage.createActivityLog({
@@ -290,7 +294,7 @@ export async function registerRoutes(
         details: `تم نشر الترخيص ${license.licenseId} على السيرفر ${server.name}`,
       });
 
-      res.json({ success: true, message: "تم النشر بنجاح" });
+      res.json({ success: true, message: "تم النشر والتفعيل بنجاح" });
     } else {
       res.status(500).json({ message: result.error || "فشل النشر" });
     }

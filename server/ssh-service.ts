@@ -63,12 +63,16 @@ export async function testSSHConnection(
       );
     });
 
+    conn.on("keyboard-interactive", (_name, _instructions, _instructionsLang, _prompts, finish) => {
+      finish([password]);
+    });
+
     conn.on("error", (err: Error) => {
       clearTimeout(timeout);
       resolve({ connected: false, error: err.message });
     });
 
-    conn.connect({ host, port, username, password, readyTimeout: 10000 });
+    conn.connect({ host, port, username, password, readyTimeout: 10000, tryKeyboard: true } as any);
   });
 }
 
@@ -99,12 +103,16 @@ export async function executeSSHCommand(
       });
     });
 
+    conn.on("keyboard-interactive", (_name, _instructions, _instructionsLang, _prompts, finish) => {
+      finish([password]);
+    });
+
     conn.on("error", (err: Error) => {
       clearTimeout(timeout);
       resolve({ success: false, error: err.message });
     });
 
-    conn.connect({ host, port, username, password, readyTimeout: 10000 });
+    conn.connect({ host, port, username, password, readyTimeout: 10000, tryKeyboard: true } as any);
   });
 }
 
