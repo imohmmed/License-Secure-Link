@@ -432,7 +432,7 @@ export async function registerRoutes(
 
     await storage.updateLicense(req.params.id, { status: "suspended" });
     await storage.createActivityLog({
-      licenseId: license.licenseId,
+      licenseId: license.id,
       serverId: license.serverId,
       action: "suspend_license",
       details: `تم تعطيل الترخيص ${license.licenseId} - الملفات باقية على السيرفر`,
