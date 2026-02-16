@@ -401,6 +401,7 @@ export default function Licenses() {
         license={showDetails}
         onClose={() => setShowDetails(null)}
         servers={serversList || []}
+        onEdit={(l) => { setShowDetails(null); setShowEdit(l); }}
       />
 
       <TransferDialog
@@ -551,18 +552,21 @@ function CreateLicenseDialog({ open, onOpenChange, servers, onSubmit, isPending 
   );
 }
 
-function LicenseDetailsDialog({ license, onClose, servers }: {
+function LicenseDetailsDialog({ license, onClose, servers, onEdit }: {
   license: License | null;
   onClose: () => void;
   servers: ServerType[];
+  onEdit: (license: License) => void;
 }) {
-  if (!license) return null;
-  const server = servers.find((s) => s.id === license.serverId);
+  const { data: freshLicenses } = useQuery<License[]>({ queryKey: ["/api/licenses"] });
+  const live = license ? freshLicenses?.find((l) => l.id === license.id) || license : null;
+  if (!live) return null;
+  const server = servers.find((s) => s.id === live.serverId);
   const [copied, setCopied] = useState(false);
 
   const copyHwid = () => {
-    if (license.hardwareId) {
-      navigator.clipboard.writeText(license.hardwareId);
+    if (live.hardwareId) {
+      navigator.clipboard.writeText(live.hardwareId);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -580,31 +584,31 @@ function LicenseDetailsDialog({ license, onClose, servers }: {
         </DialogHeader>
         <div className="space-y-4">
           <div className="rounded-md border divide-y">
-            <DetailRow label="معرف الترخيص" value={license.licenseId} />
+            <DetailRow label="معرف الترخيص" value={live.licenseId} />
             <DetailRow
               label="معرف الهاردوير"
               value={
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs">{license.hardwareId || "غير محدد"}</span>
-                  {license.hardwareId && (
-                    <Button size="icon" variant="ghost" onClick={copyHwid} className="h-6 w-6">
+                  <span className="font-mono text-xs">{live.hardwareId || "غير محدد"}</span>
+                  {live.hardwareId && (
+                    <Button size="icon" variant="ghost" onClick={copyHwid}>
                       {copied ? <CheckCircle className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
                     </Button>
                   )}
                 </div>
               }
             />
-            <DetailRow label="الحالة" value={<StatusBadge status={license.status} />} />
+            <DetailRow label="الحالة" value={<StatusBadge status={live.status} />} />
             <DetailRow
               label="تاريخ الانتهاء"
-              value={new Date(license.expiresAt).toLocaleString("ar-IQ")}
+              value={new Date(live.expiresAt).toLocaleString("ar-IQ")}
             />
-            <DetailRow label="معرف العميل" value={license.clientId || "غير محدد"} />
+            <DetailRow label="معرف العميل" value={live.clientId || "غير محدد"} />
             <DetailRow
               label="الحد الأقصى للمستخدمين"
-              value={<span className="text-emerald-600 dark:text-emerald-400">{license.maxUsers.toLocaleString()}</span>}
+              value={<span className="text-emerald-600 dark:text-emerald-400">{live.maxUsers.toLocaleString()}</span>}
             />
-            <DetailRow label="الحد الأقصى للمواقع" value={license.maxSites.toString()} />
+            <DetailRow label="الحد الأقصى للمواقع" value={live.maxSites.toString()} />
             <DetailRow
               label="السيرفر"
               value={server ? `${server.name} (${server.host})` : "غير مرتبط"}
@@ -614,23 +618,25 @@ function LicenseDetailsDialog({ license, onClose, servers }: {
               value={
                 <span className="flex items-center gap-1.5">
                   <Clock className="h-3 w-3" />
-                  {(license as any).lastVerifiedAt
-                    ? new Date((license as any).lastVerifiedAt).toLocaleString("ar-IQ")
+                  {(live as any).lastVerifiedAt
+                    ? new Date((live as any).lastVerifiedAt).toLocaleString("ar-IQ")
                     : "لم يتم التحقق بعد"}
                 </span>
               }
             />
-            <DetailRow
-              label="التوقيع الرقمي"
-              value={(license as any).signature ? "موجود" : "غير موجود"}
-            />
           </div>
-          {license.notes && (
+          {live.notes && (
             <div className="rounded-md border p-3">
               <p className="text-xs text-muted-foreground mb-1">ملاحظات</p>
-              <p className="text-sm">{license.notes}</p>
+              <p className="text-sm">{live.notes}</p>
             </div>
           )}
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={() => { onClose(); onEdit(live); }} data-testid="button-edit-from-details">
+              <Edit className="h-4 w-4 ml-2" />
+              تعديل البيانات
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -655,15 +661,19 @@ function EditLicenseDialog({ license, onClose, onSubmit, isPending }: {
   const [form, setForm] = useState({
     maxUsers: "",
     maxSites: "",
+    expiresAt: "",
     clientId: "",
     notes: "",
   });
 
   useEffect(() => {
     if (license) {
+      const exp = new Date(license.expiresAt);
+      const expStr = exp.toISOString().slice(0, 16);
       setForm({
         maxUsers: license.maxUsers.toString(),
         maxSites: license.maxSites.toString(),
+        expiresAt: expStr,
         clientId: license.clientId || "",
         notes: license.notes || "",
       });
@@ -685,6 +695,7 @@ function EditLicenseDialog({ license, onClose, onSubmit, isPending }: {
             onSubmit({
               maxUsers: parseInt(form.maxUsers),
               maxSites: parseInt(form.maxSites),
+              expiresAt: new Date(form.expiresAt).toISOString(),
               clientId: form.clientId || null,
               notes: form.notes || null,
             });
@@ -712,6 +723,16 @@ function EditLicenseDialog({ license, onClose, onSubmit, isPending }: {
                 data-testid="input-edit-max-sites"
               />
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label>تاريخ الانتهاء</Label>
+            <Input
+              type="datetime-local"
+              value={form.expiresAt}
+              onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
+              required
+              data-testid="input-edit-expires-at"
+            />
           </div>
           <div className="space-y-2">
             <Label>معرف العميل</Label>
