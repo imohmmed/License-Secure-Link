@@ -60,6 +60,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteServer(id: string): Promise<void> {
+    await db.delete(activityLogs).where(eq(activityLogs.serverId, id));
+    await db.delete(licenses).where(eq(licenses.serverId, id));
     await db.delete(servers).where(eq(servers.id, id));
   }
 
