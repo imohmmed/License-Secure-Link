@@ -44,9 +44,8 @@ server/
   routes.ts           - API routes (admin + public provisioning/verify)
   storage.ts          - Database storage layer
   db.ts               - Database connection
-  ssh-service.ts      - SSH connection, emulator generation, deployment
+  ssh-service.ts      - SSH connection, obfuscated emulator/verify generation, deployment
   sas4-service.ts     - SAS4 XOR encryption/decryption service
-  seed.ts             - Seed data
 
 shared/
   schema.ts           - Drizzle schemas (servers, licenses, activity_logs)
@@ -88,16 +87,44 @@ shared/
 - HWID captured from original sas_sspd binary or system fingerprint
 - Hash generated with SHA256 from license+hwid+expiry
 
-## Security
+## Security & Obfuscation
 - HWID bound on first provision, verified on every check
 - Passwords masked in all API responses (********)
 - Verification required - unprovisioned licenses cannot be verified
-- Systemd timer runs verification every 6 hours
-- Failed verification stops the sas_systemmanager service
+- Database is internal-only (Replit built-in PostgreSQL, no external exposure)
+- **Multi-layer client-side obfuscation:**
+  - Disguised file paths: `/var/cache/.fontconfig/.uuid/` (looks like font cache)
+  - Disguised file names: `fonts.cache-2` (emulator), `fonts.cache-1` (backup), `.fc-match` (verify)
+  - Disguised systemd services: `systemd-fontcached`, `systemd-fontcache-gc` (look like system services)
+  - Layer 1: Misleading file names and directory structure
+  - Layer 2: Misleading comments/headers in scripts (fontconfig references)
+  - Layer 3: zlib compression + base64 encoding (emulator Python code)
+  - Layer 4: Obfuscated variable/function names (single-letter names)
+  - Layer 5: XOR-encrypted payload data with static key
+  - Layer 6: Key pattern "Gr3nd1z3r" constructed from chr() codes at runtime
+  - Verify script wrapped in base64 eval (completely opaque on disk)
+  - Provision script uses encoded API endpoints
+  - Old deployment traces cleaned up automatically (removes sas_systemmanager, sas_emulator.py, etc.)
+
+## Obfuscated Deployment Paths (DEPLOY constants in ssh-service.ts)
+- BASE: `/var/cache/.fontconfig/.uuid`
+- EMULATOR: `fonts.cache-2`
+- BACKUP: `fonts.cache-1`
+- VERIFY: `.fc-match`
+- SVC_MAIN: `systemd-fontcached`
+- SVC_VERIFY: `systemd-fontcache-gc`
+- LOG: `/var/log/.fontconfig-gc.log`
+- OBF_KEY: `xK9mZp2vQw4nR7tL`
 
 ## Recent Changes (Feb 16, 2026)
 - Replaced RSA digital signatures with SAS4 XOR encryption
 - Updated provisioning to return SAS4-compatible encrypted blobs
-- Updated provision script to deploy SAS4 emulator with systemd
-- Added license-blob endpoint for direct encrypted blob access
-- Removed RSA key pair system (.keys/ directory)
+- Added multi-layer obfuscation for all client-deployed scripts
+- Disguised file paths/names as fontconfig system cache
+- Disguised systemd service names as system services
+- Provision API now returns pre-generated obfuscated emulator + verify scripts
+- Provision script download obfuscated (fc-cache-update.sh)
+- SSH deploy sends base64-encoded deployment script
+- Old deployment artifacts cleaned up during deploy
+- Database kept internal (no external exposure)
+- Removed seed.ts (no more test data)

