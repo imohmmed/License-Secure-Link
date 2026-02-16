@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { testSSHConnection, deployLicenseToServer } from "./ssh-service";
 import { insertServerSchema, insertLicenseSchema } from "@shared/schema";
-import { signLicensePayload, buildLicensePayload, getPublicKey } from "./rsa-service";
+import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -376,7 +376,7 @@ export async function registerRoutes(
       status: "active",
     });
 
-    const payload = buildLicensePayload(
+    const payload = buildSAS4Payload(
       license.licenseId,
       hardware_id,
       new Date(license.expiresAt),
@@ -385,9 +385,9 @@ export async function registerRoutes(
       "active"
     );
 
-    const signature = signLicensePayload(payload);
+    const encrypted = encryptSAS4Payload(payload);
 
-    await storage.updateLicense(license.id, { signature });
+    await storage.updateLicense(license.id, { signature: encrypted });
 
     await storage.createActivityLog({
       licenseId: license.id,
@@ -398,8 +398,7 @@ export async function registerRoutes(
 
     res.json({
       license: payload,
-      signature,
-      public_key: getPublicKey(),
+      encrypted_blob: encrypted,
     });
   });
 
@@ -466,7 +465,7 @@ export async function registerRoutes(
       details: `تحقق ناجح للترخيص ${license_id}`,
     });
 
-    const payload = buildLicensePayload(
+    const payload = buildSAS4Payload(
       license.licenseId,
       hardware_id,
       new Date(license.expiresAt),
@@ -475,19 +474,33 @@ export async function registerRoutes(
       license.status
     );
 
-    const signature = signLicensePayload(payload);
+    const encrypted = encryptSAS4Payload(payload);
 
     res.json({
       valid: true,
       status: "active",
       license: payload,
-      signature,
+      encrypted_blob: encrypted,
     });
   });
 
-  // ─── Public Key Endpoint ─────────────────────────────────
-  app.get("/api/public-key", (_req, res) => {
-    res.type("text/plain").send(getPublicKey());
+  // ─── SAS4 Encrypted Blob Endpoint ──────────────────────
+  app.get("/api/license-blob/:licenseId", async (req, res) => {
+    const license = await storage.getLicenseByLicenseId(req.params.licenseId);
+    if (!license) return res.status(404).json({ error: "License not found" });
+    if (!license.hardwareId) return res.status(400).json({ error: "License not provisioned" });
+    if (license.status !== "active") return res.status(403).json({ error: "License not active" });
+
+    const payload = buildSAS4Payload(
+      license.licenseId,
+      license.hardwareId,
+      new Date(license.expiresAt),
+      license.maxUsers,
+      license.maxSites,
+      license.status
+    );
+    const encrypted = encryptSAS4Payload(payload);
+    res.type("text/plain").send(encrypted);
   });
 
   // ─── Provision Script Download ───────────────────────────
@@ -500,65 +513,166 @@ export async function registerRoutes(
     const baseUrl = `${protocol === "https" ? "https" : (process.env.NODE_ENV === "production" ? "https" : "http")}://${serverHost}`;
 
     const script = `#!/bin/bash
-# provision.sh - License Provisioning Script
+# SAS4 Activator - License Provisioning Script
 # License ID: ${license.licenseId}
 # Generated: $(date)
+# ------------------------------------
 
-set -e
-
+BIN_DIR="/opt/sas4/bin"
+SSPD_BIN="$BIN_DIR/sas_sspd"
+SSPD_BAK="$BIN_DIR/sas_sspd.bak"
+EMULATOR_PY="$BIN_DIR/sas_emulator.py"
+SERVICE_FILE="/etc/systemd/system/sas_systemmanager.service"
 LICENSE_ID="${license.licenseId}"
 SERVER_URL="${baseUrl}"
-INSTALL_DIR="/opt/license"
-VERIFY_INTERVAL=21600  # 6 hours in seconds
+
+if [ "$EUID" -ne 0 ]; then echo "Please run as root (sudo)"; exit 1; fi
 
 echo "======================================"
-echo "  License Provisioning System"
+echo "  SAS4 License Activator"
 echo "  License: $LICENSE_ID"
 echo "======================================"
 
-# Collect Hardware ID
-echo "[1/5] Collecting hardware fingerprint..."
-MACHINE_ID=$(cat /etc/machine-id 2>/dev/null || echo "")
-PRODUCT_UUID=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
-MAC_ADDR=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
+# 1. Stop Services
+echo "[1/6] Stopping existing services..."
+systemctl stop sas_systemmanager 2>/dev/null
+killall sas_sspd python3 2>/dev/null
+sleep 1
 
-HWID_RAW="\${MACHINE_ID}:\${PRODUCT_UUID}:\${MAC_ADDR}"
-HARDWARE_ID=$(echo -n "$HWID_RAW" | sha256sum | awk '{print $1}')
-echo "  Hardware ID: $HARDWARE_ID"
+# 2. Backup Binary
+echo "[2/6] Backing up original binary..."
+if [ ! -f "$SSPD_BAK" ] && [ -f "$SSPD_BIN" ]; then
+    cp "$SSPD_BIN" "$SSPD_BAK" && chmod +x "$SSPD_BAK"
+fi
 
-# Request license from server
-echo "[2/5] Requesting license from server..."
+# 3. Capture Real HWID
+echo "[3/6] Capturing Hardware ID..."
+if [ -f "$SSPD_BAK" ]; then
+    "$SSPD_BAK" > /dev/null 2>&1 &
+    PID=$!
+    sleep 5
+    BLOB=$(curl -s "http://127.0.0.1:4000/?op=get")
+    kill $PID 2>/dev/null
+
+    HWID=$(python3 -c "
+import base64, json
+blob = '$BLOB'
+def xor_crypt(data, key):
+    k = key.encode()
+    return bytes(data[i] ^ k[i % len(k)] for i in range(len(data)))
+found = False
+for h in range(24):
+    key = f'Gr3nd1z3r{h}'
+    try:
+        dec = xor_crypt(base64.b64decode(blob), key).decode()
+        if 'hwid' in dec:
+            print(json.loads(dec)['hwid'])
+            found = True; break
+    except: pass
+if not found: print('N/A')
+")
+else
+    MACHINE_ID=$(cat /etc/machine-id 2>/dev/null || echo "")
+    PRODUCT_UUID=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
+    MAC_ADDR=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print \\$2}' || echo "")
+    HWID_RAW="\${MACHINE_ID}:\${PRODUCT_UUID}:\${MAC_ADDR}"
+    HWID=$(echo -n "$HWID_RAW" | sha256sum | awk '{print \\$1}')
+fi
+
+echo "  Captured HWID: $HWID"
+
+# 4. Provision with license server
+echo "[4/6] Provisioning with license server..."
 RESPONSE=$(curl -s -X POST "$SERVER_URL/api/provision" \\
   -H "Content-Type: application/json" \\
-  -d "{\\"license_id\\": \\"$LICENSE_ID\\", \\"hardware_id\\": \\"$HARDWARE_ID\\"}")
+  -d "{\\"license_id\\": \\"$LICENSE_ID\\", \\"hardware_id\\": \\"$HWID\\"}")
 
-# Check for errors
 if echo "$RESPONSE" | grep -q '"error"'; then
   ERROR=$(echo "$RESPONSE" | grep -o '"error":"[^"]*"' | cut -d'"' -f4)
   echo "ERROR: $ERROR"
   exit 1
 fi
 
-# Install license
-echo "[3/5] Installing license..."
-mkdir -p "$INSTALL_DIR"
-
-echo "$RESPONSE" | python3 -c "
+LICENSE_DATA=$(echo "$RESPONSE" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-with open('$INSTALL_DIR/license.json', 'w') as f:
-    json.dump(data['license'], f, indent=2)
-with open('$INSTALL_DIR/license.sig', 'w') as f:
-    f.write(data['signature'])
-with open('$INSTALL_DIR/public.pem', 'w') as f:
-    f.write(data['public_key'])
-"
+lic = data['license']
+print(json.dumps(lic))
+")
 
-echo "  License installed to $INSTALL_DIR/"
+EXP=$(echo "$LICENSE_DATA" | python3 -c "import sys,json; print(json.load(sys.stdin)['exp'])")
+MU=$(echo "$LICENSE_DATA" | python3 -c "import sys,json; print(json.load(sys.stdin)['mu'])")
+MS=$(echo "$LICENSE_DATA" | python3 -c "import sys,json; print(json.load(sys.stdin)['ms'])")
+HASH=$(echo "$LICENSE_DATA" | python3 -c "import sys,json; print(json.load(sys.stdin)['hash'])")
 
-# Create verification script
-echo "[4/5] Setting up periodic verification..."
-cat > "$INSTALL_DIR/verify.sh" << 'VERIFY_EOF'
+# 5. Generate Emulator
+echo "[5/6] Deploying SAS4 emulator..."
+mkdir -p "$BIN_DIR"
+
+cat <<EOF > "$EMULATOR_PY"
+import http.server, socketserver, json, time, base64
+
+def get_current_key():
+    current_hour = time.localtime().tm_hour
+    return f"Gr3nd1z3r{current_hour + 1}"
+
+def xor_crypt(data, key):
+    k = key.encode()
+    d = data.encode() if isinstance(data, str) else data
+    return bytes(d[i] ^ k[i % len(k)] for i in range(len(d)))
+
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        payload = {
+            "pid": "$LICENSE_ID",
+            "hwid": "$HWID",
+            "exp": "$EXP",
+            "ftrs": [
+                "gp_fup", "gp_daily_limit", "gp_quota_limit",
+                "prm_users_index", "prm_users_index_all", "prm_users_index_group",
+                "prm_users_create", "prm_users_update", "prm_users_delete",
+                "prm_users_rename", "prm_users_cancel", "prm_users_deposit",
+                "prm_users_withdrawal", "prm_users_add_traffic", "prm_users_reset_quota",
+                "prm_users_pos", "prm_users_advanced", "prm_users_export",
+                "prm_users_change_parent", "prm_users_show_password", "prm_users_mac_lock",
+                "prm_managers_index", "prm_managers_create", "prm_managers_update",
+                "prm_managers_delete", "prm_managers_sysadmin", "prm_sites_management",
+                "prm_groups_assign", "prm_tools_bulk_changes"
+            ],
+            "st": "1",
+            "mu": "$MU",
+            "ms": "$MS",
+            "id": "$LICENSE_ID",
+            "hash": "$HASH"
+        }
+        key = get_current_key()
+        res = base64.b64encode(xor_crypt(json.dumps(payload), key))
+        self.send_response(200)
+        self.send_header('Content-length', str(len(res)))
+        self.end_headers()
+        self.wfile.write(res)
+    def log_message(self, *args): pass
+
+socketserver.TCPServer.allow_reuse_address = True
+with socketserver.TCPServer(("", 4000), H) as httpd:
+    httpd.serve_forever()
+EOF
+
+# 6. Deploy Service + Verification Timer
+echo "[6/6] Setting up services..."
+cat <<EOF > "$SERVICE_FILE"
+[Unit]
+Description=SAS4 System Manager
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 $EMULATOR_PY
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /opt/sas4/verify.sh << 'VERIFY_EOF'
 #!/bin/bash
 LICENSE_ID="${license.licenseId}"
 SERVER_URL="${baseUrl}"
@@ -567,62 +681,77 @@ MACHINE_ID=$(cat /etc/machine-id 2>/dev/null || echo "")
 PRODUCT_UUID=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
 MAC_ADDR=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
 HWID_RAW="\${MACHINE_ID}:\${PRODUCT_UUID}:\${MAC_ADDR}"
-HARDWARE_ID=$(echo -n "$HWID_RAW" | sha256sum | awk '{print $1}')
 
-RESULT=$(curl -s -X POST "$SERVER_URL/api/verify" \\
-  -H "Content-Type: application/json" \\
-  -d "{\\"license_id\\": \\"$LICENSE_ID\\", \\"hardware_id\\": \\"$HARDWARE_ID\\"}")
+if [ -f "/opt/sas4/bin/sas_sspd.bak" ]; then
+    /opt/sas4/bin/sas_sspd.bak > /dev/null 2>&1 &
+    PID=$!; sleep 3
+    BLOB=$(curl -s "http://127.0.0.1:4000/?op=get")
+    kill $PID 2>/dev/null
+    HARDWARE_ID=$(python3 -c "
+import base64, json
+blob = '$BLOB'
+def xor_crypt(data, key):
+    k = key.encode()
+    return bytes(data[i] ^ k[i % len(k)] for i in range(len(data)))
+for h in range(24):
+    key = f'Gr3nd1z3r{h}'
+    try:
+        dec = xor_crypt(base64.b64decode(blob), key).decode()
+        if 'hwid' in dec:
+            print(json.loads(dec)['hwid']); break
+    except: pass
+")
+else
+    HARDWARE_ID=$(echo -n "$HWID_RAW" | sha256sum | awk '{print $1}')
+fi
+
+RESULT=$(curl -s -X POST "$SERVER_URL/api/verify" \
+  -H "Content-Type: application/json" \
+  -d "{\"license_id\": \"$LICENSE_ID\", \"hardware_id\": \"$HARDWARE_ID\"}")
 
 VALID=$(echo "$RESULT" | grep -o '"valid":true' || echo "")
 
 if [ -z "$VALID" ]; then
   STATUS=$(echo "$RESULT" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
-  echo "$(date): License verification FAILED - Status: $STATUS" >> /var/log/license-verify.log
-  # Stop the protected service
+  echo "$(date): License verification FAILED - Status: $STATUS" >> /var/log/sas4-verify.log
   systemctl stop sas_systemmanager 2>/dev/null || true
   exit 1
 else
-  echo "$(date): License verification OK" >> /var/log/license-verify.log
+  echo "$(date): License verification OK" >> /var/log/sas4-verify.log
 fi
 VERIFY_EOF
-chmod +x "$INSTALL_DIR/verify.sh"
+chmod +x /opt/sas4/verify.sh
 
-# Setup systemd timer for periodic verification
-cat > /etc/systemd/system/license-verify.service << 'SVC_EOF'
+cat > /etc/systemd/system/sas4-verify.service << 'SVC_EOF'
 [Unit]
-Description=License Verification Service
-
+Description=SAS4 License Verification
 [Service]
 Type=oneshot
-ExecStart=/opt/license/verify.sh
+ExecStart=/opt/sas4/verify.sh
 SVC_EOF
 
-cat > /etc/systemd/system/license-verify.timer << 'TMR_EOF'
+cat > /etc/systemd/system/sas4-verify.timer << 'TMR_EOF'
 [Unit]
-Description=License Verification Timer (every 6 hours)
-
+Description=SAS4 License Verify Timer (every 6 hours)
 [Timer]
 OnBootSec=60
 OnUnitActiveSec=6h
 Persistent=true
-
 [Install]
 WantedBy=timers.target
 TMR_EOF
 
 systemctl daemon-reload
-systemctl enable license-verify.timer
-systemctl start license-verify.timer
-
-echo "[5/5] Running initial verification..."
-bash "$INSTALL_DIR/verify.sh"
+systemctl enable sas_systemmanager sas4-verify.timer
+systemctl start sas_systemmanager sas4-verify.timer
 
 echo ""
 echo "======================================"
-echo "  Provisioning Complete!"
+echo "  SAS4 Activation Complete!"
 echo "  License: $LICENSE_ID"
-echo "  Hardware: $HARDWARE_ID"
+echo "  HWID: $HWID"
 echo "  Verify every 6 hours: ENABLED"
+echo "  Panel Active on port 4000"
 echo "======================================"
 `;
 

@@ -1,26 +1,26 @@
 # License Manager - نظام إدارة التراخيص
 
 ## Overview
-A centralized license management system (License Authority) that manages software licenses for client servers. Features RSA digital signature, hardware ID locking, HTTPS provisioning API, periodic verification, and SSH deployment.
+A centralized license management system (License Authority) for SAS4 software. Uses XOR encryption (Gr3nd1z3r key pattern) compatible with SAS4 proxy logic, hardware ID locking, provisioning API, periodic verification, and SSH deployment of emulator scripts.
 
 ## Architecture
 - **Frontend**: React + Vite + Tailwind CSS + shadcn/ui (RTL Arabic interface)
 - **Backend**: Express.js with TypeScript
 - **Database**: PostgreSQL with Drizzle ORM
 - **SSH**: ssh2 library for remote server connections
-- **Security**: RSA 2048-bit digital signatures, HWID binding
+- **Security**: SAS4 XOR encryption (Gr3nd1z3r{hour+1} key), HWID binding
 - **Language**: Arabic (Iraqi dialect) UI
 
 ## Key Features
 - License CRUD (create, activate, suspend, extend, transfer, delete, edit)
-- RSA digital signature for licenses (Private Key server-side only)
-- Provisioning API (client sends HWID → gets signed license + public key)
+- SAS4-compatible XOR encryption for license payloads
+- Provisioning API (client sends HWID → gets encrypted SAS4 blob)
 - Periodic verification API (client checks every 6 hours)
 - Hardware ID locking (prevents license copying to other devices)
-- Provision script generation/download for client servers
+- SAS4 emulator deployment to client servers via SSH
+- Provision script generation/download (deploys emulator + systemd service)
 - Server management with SSH credentials (passwords masked in API)
 - SSH connection testing with Hardware ID detection
-- License deployment to remote servers via SSH
 - Activity logging for all operations (provision, verify, HWID mismatch)
 - Dashboard with statistics overview
 - Last verification time tracking per license
@@ -44,14 +44,12 @@ server/
   routes.ts           - API routes (admin + public provisioning/verify)
   storage.ts          - Database storage layer
   db.ts               - Database connection
-  ssh-service.ts      - SSH connection and deployment logic
-  rsa-service.ts      - RSA key pair management and license signing
+  ssh-service.ts      - SSH connection, emulator generation, deployment
+  sas4-service.ts     - SAS4 XOR encryption/decryption service
   seed.ts             - Seed data
 
 shared/
   schema.ts           - Drizzle schemas (servers, licenses, activity_logs)
-
-.keys/                - RSA key pair (auto-generated, gitignored)
 ```
 
 ## Database Schema
@@ -70,31 +68,36 @@ shared/
 - `PATCH /api/licenses/:id/status` - Update license status
 - `POST /api/licenses/:id/extend` - Extend license duration
 - `POST /api/licenses/:id/transfer` - Transfer to another server
-- `POST /api/licenses/:id/deploy` - Deploy license file via SSH
+- `POST /api/licenses/:id/deploy` - Deploy SAS4 emulator via SSH
 - `DELETE /api/licenses/:id` - Delete license
 - `GET /api/activity-logs` - Get activity logs
 - `GET /api/stats` - Dashboard statistics
 
 ### Public API (Client Servers)
-- `POST /api/provision` - Provision license (sends HWID, gets signed license + public key)
+- `POST /api/provision` - Provision license (sends HWID, gets SAS4 encrypted blob)
 - `POST /api/verify` - Periodic verification (sends license_id + HWID, checks status)
-- `GET /api/public-key` - Get RSA public key
-- `GET /api/provision-script/:licenseId` - Download provision.sh script
+- `GET /api/license-blob/:licenseId` - Get XOR-encrypted SAS4 license blob
+- `GET /api/provision-script/:licenseId` - Download SAS4 activator script
 
-## Security Model
-- RSA 2048-bit key pair auto-generated on first run
-- Private key stored server-side only (.keys/private.pem)
-- Public key distributed to clients during provisioning
-- License payload signed with SHA256+RSA
+## SAS4 Encryption Model
+- XOR encryption with time-based key: `Gr3nd1z3r{hour+1}`
+- Payload format: {pid, hwid, exp, ftrs, st, mu, ms, id, hash}
+- Encrypted payload is base64 encoded
+- Emulator serves encrypted blob on port 4000 (localhost)
+- SAS4 software queries `http://127.0.0.1:4000/?op=get`
+- HWID captured from original sas_sspd binary or system fingerprint
+- Hash generated with SHA256 from license+hwid+expiry
+
+## Security
 - HWID bound on first provision, verified on every check
 - Passwords masked in all API responses (********)
 - Verification required - unprovisioned licenses cannot be verified
+- Systemd timer runs verification every 6 hours
+- Failed verification stops the sas_systemmanager service
 
 ## Recent Changes (Feb 16, 2026)
-- Added RSA digital signature system
-- Added provisioning and verification APIs
-- Added provision.sh script generation
-- Added license editing (maxUsers/maxSites)
-- Added lastVerifiedAt tracking
-- Fixed payload signing order (sign after status update)
-- Enforced HWID binding on verify (must provision first)
+- Replaced RSA digital signatures with SAS4 XOR encryption
+- Updated provisioning to return SAS4-compatible encrypted blobs
+- Updated provision script to deploy SAS4 emulator with systemd
+- Added license-blob endpoint for direct encrypted blob access
+- Removed RSA key pair system (.keys/ directory)
