@@ -110,7 +110,11 @@ export async function registerRoutes(
   });
 
   app.post("/api/licenses", async (req, res) => {
-    const parsed = insertLicenseSchema.safeParse(req.body);
+    const body = { ...req.body };
+    if (typeof body.expiresAt === "string") {
+      body.expiresAt = new Date(body.expiresAt);
+    }
+    const parsed = insertLicenseSchema.safeParse(body);
     if (!parsed.success) {
       return res.status(400).json({ message: parsed.error.message });
     }
@@ -321,7 +325,11 @@ export async function registerRoutes(
     const updateData: any = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
-        updateData[field] = req.body[field];
+        if (field === "expiresAt" && typeof req.body[field] === "string") {
+          updateData[field] = new Date(req.body[field]);
+        } else {
+          updateData[field] = req.body[field];
+        }
       }
     }
 
