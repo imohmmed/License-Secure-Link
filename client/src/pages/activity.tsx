@@ -50,7 +50,7 @@ export default function Activity() {
   });
 
   return (
-    <div className="p-6 space-y-6" dir="rtl">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto" dir="rtl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight" data-testid="text-activity-title">سجل النشاط</h1>
         <p className="text-muted-foreground text-sm mt-1">جميع العمليات التي تمت على النظام</p>

@@ -114,7 +114,7 @@ export default function Servers() {
   });
 
   return (
-    <div className="p-6 space-y-6" dir="rtl">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto" dir="rtl">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" data-testid="text-servers-title">السيرفرات</h1>

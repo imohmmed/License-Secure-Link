@@ -39,7 +39,6 @@ import {
   Pause,
   RefreshCw,
   ArrowRightLeft,
-  Trash2,
   Search,
   Shield,
   Calendar,
@@ -48,7 +47,6 @@ import {
   Server,
   Copy,
   CheckCircle,
-  Download,
   Edit,
   Clock,
 } from "lucide-react";
@@ -151,7 +149,7 @@ export default function Licenses() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity-logs"] });
-      toast({ title: "تم حذف الترخيص" });
+      toast({ title: "تم تعطيل الترخيص" });
     },
     onError: (err: Error) => {
       toast({ title: "خطأ", description: err.message, variant: "destructive" });
@@ -173,10 +171,6 @@ export default function Licenses() {
       toast({ title: "خطأ", description: err.message, variant: "destructive" });
     },
   });
-
-  const downloadProvisionScript = (licenseId: string) => {
-    window.open(`/api/provision-script/${licenseId}`, "_blank");
-  };
 
   const deployMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -202,7 +196,7 @@ export default function Licenses() {
   });
 
   return (
-    <div className="p-6 space-y-6" dir="rtl">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto" dir="rtl">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" data-testid="text-licenses-title">التراخيص</h1>
@@ -348,25 +342,18 @@ export default function Licenses() {
                             نشر على السيرفر
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem
-                          onClick={() => downloadProvisionScript(license.licenseId)}
-                          data-testid={`action-provision-${license.id}`}
-                        >
-                          <Download className="h-4 w-4 ml-2" />
-                          تنزيل سكربت التفعيل
-                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-destructive"
                           onClick={() => {
-                            if (confirm("هل أنت متأكد من حذف هذا الترخيص؟")) {
+                            if (confirm("هل أنت متأكد من تعطيل هذا الترخيص؟")) {
                               deleteMutation.mutate(license.id);
                             }
                           }}
                           data-testid={`action-delete-${license.id}`}
                         >
-                          <Trash2 className="h-4 w-4 ml-2" />
-                          حذف
+                          <Pause className="h-4 w-4 ml-2" />
+                          تعطيل
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

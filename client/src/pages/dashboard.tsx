@@ -70,7 +70,7 @@ export default function Dashboard() {
   const loading = licensesLoading || serversLoading;
 
   return (
-    <div className="p-6 space-y-6" dir="rtl">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto" dir="rtl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight" data-testid="text-dashboard-title">لوحة التحكم</h1>
         <p className="text-muted-foreground text-sm mt-1">نظرة عامة على التراخيص والسيرفرات</p>
