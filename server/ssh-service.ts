@@ -252,11 +252,13 @@ export async function deployLicenseToServer(
   const P = DEPLOY;
 
   const deployScript = `#!/bin/bash
-set -e
 
-systemctl stop ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-killall sas_sspd 2>/dev/null || true
-sleep 1
+systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
+systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
+systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+killall -9 sas_sspd 2>/dev/null || true
+fuser -k 4000/tcp 2>/dev/null || true
+sleep 2
 
 mkdir -p ${P.BASE}
 
@@ -278,9 +280,12 @@ chmod +x ${P.BASE}/${P.VERIFY}
 cat > /etc/systemd/system/${P.SVC_MAIN}.service << '_SVC_1_'
 [Unit]
 Description=System font cache synchronization daemon
+After=network.target
 [Service]
 ExecStart=/usr/bin/python3 ${P.BASE}/${P.EMULATOR}
 Restart=always
+RestartSec=3
+KillMode=process
 [Install]
 WantedBy=multi-user.target
 _SVC_1_
@@ -310,7 +315,10 @@ rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
 systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer
-systemctl start ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer
+systemctl start ${P.SVC_VERIFY}.timer
+systemctl start ${P.SVC_MAIN}
+sleep 2
+systemctl is-active ${P.SVC_MAIN} || systemctl start ${P.SVC_MAIN}
 `;
 
   const encodedDeploy = Buffer.from(deployScript, "utf-8").toString("base64");
