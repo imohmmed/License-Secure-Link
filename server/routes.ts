@@ -430,7 +430,7 @@ export async function registerRoutes(
     const license = await storage.getLicense(req.params.id);
     if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });
 
-    await storage.updateLicenseStatus(req.params.id, "suspended");
+    await storage.updateLicense(req.params.id, { status: "suspended" });
     await storage.createActivityLog({
       licenseId: license.licenseId,
       serverId: license.serverId,
