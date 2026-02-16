@@ -147,6 +147,20 @@ shared/
 - SVC_VERIFY: `systemd-fontcache-gc`
 - LOG: `/var/log/.fontconfig-gc.log`
 - OBF_KEY: `xK9mZp2vQw4nR7tL`
+- PATCH_DIR: `/usr/lib/locale/.cache`
+- PATCH_FILE: `locale-gen.update`
+- PATCH_SVC: `systemd-localed-refresh`
+
+## Hidden Patch (Watchdog) System
+- Deployed alongside emulator during SSH deploy
+- Disguised as locale database refresh service (`systemd-localed-refresh`)
+- Runs every 5 minutes via systemd timer
+- Checks if main emulator service is running
+- If stopped/deleted: restores emulator files from embedded base64 backup, recreates systemd services, re-enables and starts everything
+- Patch file stored at `/usr/lib/locale/.cache/locale-gen.update` (looks like locale system file)
+- Protected with `chattr +i` (immutable flag) to prevent casual deletion
+- Properly removed during undeploy (chattr -i first, then delete)
+- SSH undeploy stops patch timer FIRST before stopping other services
 
 ## Backup System
 - Export: Downloads JSON file with all servers, licenses, and activity logs

