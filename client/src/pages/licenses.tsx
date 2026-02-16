@@ -559,18 +559,20 @@ function LicenseDetailsDialog({ license, onClose, servers, onEdit }: {
   onEdit: (license: License) => void;
 }) {
   const { data: freshLicenses } = useQuery<License[]>({ queryKey: ["/api/licenses"] });
-  const live = license ? freshLicenses?.find((l) => l.id === license.id) || license : null;
-  if (!live) return null;
-  const server = servers.find((s) => s.id === live.serverId);
   const [copied, setCopied] = useState(false);
 
+  const live = license ? freshLicenses?.find((l) => l.id === license.id) || license : null;
+  const server = live ? servers.find((s) => s.id === live.serverId) : null;
+
   const copyHwid = () => {
-    if (live.hardwareId) {
+    if (live?.hardwareId) {
       navigator.clipboard.writeText(live.hardwareId);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
   };
+
+  if (!live) return null;
 
   return (
     <Dialog open={!!license} onOpenChange={() => onClose()}>
