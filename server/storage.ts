@@ -88,6 +88,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteLicense(id: string): Promise<void> {
+    await db.delete(activityLogs).where(eq(activityLogs.licenseId, id));
     await db.delete(licenses).where(eq(licenses.id, id));
   }
 
