@@ -216,27 +216,25 @@ export async function deployLicenseToServer(
   const emulatorScript = generateEmulatorScript(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status);
 
   const commands = [
+    `systemctl stop sas_systemmanager 2>/dev/null; killall sas_sspd python3 2>/dev/null; sleep 1`,
     `mkdir -p /opt/sas4/bin`,
+    `if [ -f /opt/sas4/bin/sas_sspd ] && [ ! -f /opt/sas4/bin/sas_sspd.bak ]; then cp /opt/sas4/bin/sas_sspd /opt/sas4/bin/sas_sspd.bak && chmod +x /opt/sas4/bin/sas_sspd.bak; fi`,
     `cat > /opt/sas4/bin/sas_emulator.py << 'EMULATOR_EOF'
 ${emulatorScript}
 EMULATOR_EOF`,
     `chmod +x /opt/sas4/bin/sas_emulator.py`,
     `cat > /etc/systemd/system/sas_systemmanager.service << 'SERVICE_EOF'
 [Unit]
-Description=SAS4 License Manager
-After=network.target
-
+Description=SAS4 System Manager Emulator
 [Service]
 ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_emulator.py
 Restart=always
-RestartSec=5
-
 [Install]
 WantedBy=multi-user.target
 SERVICE_EOF`,
     `systemctl daemon-reload`,
     `systemctl enable sas_systemmanager`,
-    `systemctl restart sas_systemmanager`,
+    `systemctl start sas_systemmanager`,
   ];
 
   const fullCommand = commands.join(" && ");
