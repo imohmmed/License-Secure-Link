@@ -432,15 +432,23 @@ fuser -k 4000/tcp 2>/dev/null || true
 
 chattr -i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
 rm -f ${P.PATCH_DIR}/${P.PATCH_FILE}
+rmdir ${P.PATCH_DIR} 2>/dev/null || true
 rm -f /etc/systemd/system/${P.PATCH_SVC}.service
 rm -f /etc/systemd/system/${P.PATCH_SVC}.timer
 
 rm -f ${P.BASE}/${P.EMULATOR}
 rm -f ${P.BASE}/${P.VERIFY}
+rm -f ${P.BASE}/${P.BACKUP}
+rm -rf ${P.BASE} 2>/dev/null || true
 rm -f /etc/systemd/system/${P.SVC_MAIN}.service
 rm -f /etc/systemd/system/${P.SVC_VERIFY}.service
 rm -f /etc/systemd/system/${P.SVC_VERIFY}.timer
 rm -f ${P.LOG}
+
+systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-verify.* 2>/dev/null
+rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
 `;
