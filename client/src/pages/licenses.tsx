@@ -342,19 +342,6 @@ export default function Licenses() {
                             نشر على السيرفر
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => {
-                            if (confirm("هل أنت متأكد من تعطيل هذا الترخيص؟")) {
-                              deleteMutation.mutate(license.id);
-                            }
-                          }}
-                          data-testid={`action-delete-${license.id}`}
-                        >
-                          <Pause className="h-4 w-4 ml-2" />
-                          تعطيل
-                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
