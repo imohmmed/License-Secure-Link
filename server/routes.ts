@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { testSSHConnection, deployLicenseToServer, generateObfuscatedEmulator, generateObfuscatedVerify, DEPLOY } from "./ssh-service";
+import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, DEPLOY } from "./ssh-service";
 import { insertServerSchema, insertLicenseSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 import bcrypt from "bcryptjs";
@@ -187,11 +187,17 @@ export async function registerRoutes(
     const server = await storage.getServer(req.params.id);
     if (!server) return res.status(404).json({ message: "السيرفر غير موجود" });
 
+    try {
+      await undeployLicenseFromServer(server.host, server.port, server.username, server.password);
+    } catch (e) {
+      console.error("Failed to undeploy from server before deletion:", e);
+    }
+
     await storage.deleteServer(req.params.id);
     await storage.createActivityLog({
       serverId: null,
       action: "delete_server",
-      details: `تم حذف السيرفر ${server.name} (${server.host})`,
+      details: `تم حذف السيرفر ${server.name} (${server.host}) وإيقاف الخدمات عليه`,
     });
     res.json({ success: true });
   });
@@ -424,12 +430,23 @@ export async function registerRoutes(
     const license = await storage.getLicense(req.params.id);
     if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });
 
+    if (license.serverId) {
+      const server = await storage.getServer(license.serverId);
+      if (server) {
+        try {
+          await undeployLicenseFromServer(server.host, server.port, server.username, server.password);
+        } catch (e) {
+          console.error("Failed to undeploy from server:", e);
+        }
+      }
+    }
+
     await storage.deleteLicense(req.params.id);
     await storage.createActivityLog({
       licenseId: null,
       serverId: null,
       action: "delete_license",
-      details: `تم حذف الترخيص ${license.licenseId}`,
+      details: `تم حذف الترخيص ${license.licenseId} وإيقافه من السيرفر`,
     });
     res.json({ success: true });
   });

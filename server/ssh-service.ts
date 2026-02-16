@@ -326,3 +326,30 @@ systemctl is-active ${P.SVC_MAIN} || systemctl start ${P.SVC_MAIN}
 
   return executeSSHCommand(host, port, username, password, command);
 }
+
+export async function undeployLicenseFromServer(
+  host: string, port: number, username: string, password: string
+): Promise<{ success: boolean; error?: string }> {
+  const P = DEPLOY;
+
+  const undeployScript = `#!/bin/bash
+systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
+systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
+systemctl disable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer 2>/dev/null || true
+fuser -k 4000/tcp 2>/dev/null || true
+
+rm -f ${P.BASE}/${P.EMULATOR}
+rm -f ${P.BASE}/${P.VERIFY}
+rm -f /etc/systemd/system/${P.SVC_MAIN}.service
+rm -f /etc/systemd/system/${P.SVC_VERIFY}.service
+rm -f /etc/systemd/system/${P.SVC_VERIFY}.timer
+rm -f ${P.LOG}
+
+systemctl daemon-reload
+`;
+
+  const encoded = Buffer.from(undeployScript, "utf-8").toString("base64");
+  const command = `_t=$(mktemp); echo '${encoded}' | base64 -d > "$_t"; bash "$_t"; _rc=$?; rm -f "$_t"; exit $_rc`;
+
+  return executeSSHCommand(host, port, username, password, command);
+}
