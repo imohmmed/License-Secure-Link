@@ -29,6 +29,8 @@ export const licenses = pgTable("licenses", {
   maxSites: integer("max_sites").notNull().default(1),
   clientId: text("client_id"),
   notes: text("notes"),
+  signature: text("signature"),
+  lastVerifiedAt: timestamp("last_verified_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

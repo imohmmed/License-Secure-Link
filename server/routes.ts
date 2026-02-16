@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { testSSHConnection, deployLicenseToServer } from "./ssh-service";
 import { insertServerSchema, insertLicenseSchema } from "@shared/schema";
+import { signLicensePayload, buildLicensePayload, getPublicKey } from "./rsa-service";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -301,6 +302,333 @@ export async function registerRoutes(
   app.get("/api/activity-logs", async (_req, res) => {
     const logs = await storage.getActivityLogs();
     res.json(logs);
+  });
+
+  // ─── License Edit (maxUsers, maxSites) ────────────────────
+  app.patch("/api/licenses/:id", async (req, res) => {
+    const license = await storage.getLicense(req.params.id);
+    if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });
+
+    const allowedFields = ["maxUsers", "maxSites", "notes", "clientId", "expiresAt"];
+    const updateData: any = {};
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: "لا توجد بيانات للتحديث" });
+    }
+
+    const updated = await storage.updateLicense(req.params.id, updateData);
+
+    await storage.createActivityLog({
+      licenseId: req.params.id,
+      serverId: license.serverId,
+      action: "edit_license",
+      details: `تم تعديل بيانات الترخيص ${license.licenseId}: ${Object.keys(updateData).join(", ")}`,
+    });
+
+    res.json(updated);
+  });
+
+  // ─── Provisioning API (Client → Server) ──────────────────
+  app.post("/api/provision", async (req, res) => {
+    const { license_id, hardware_id } = req.body;
+
+    if (!license_id || !hardware_id) {
+      return res.status(400).json({ error: "license_id and hardware_id are required" });
+    }
+
+    const license = await storage.getLicenseByLicenseId(license_id);
+    if (!license) {
+      return res.status(404).json({ error: "License not found" });
+    }
+
+    if (license.status === "suspended") {
+      return res.status(403).json({ error: "License is suspended", status: "suspended" });
+    }
+
+    if (license.status === "expired" || new Date(license.expiresAt) < new Date()) {
+      if (license.status !== "expired") {
+        await storage.updateLicense(license.id, { status: "expired" });
+      }
+      return res.status(403).json({ error: "License has expired", status: "expired" });
+    }
+
+    if (license.hardwareId && license.hardwareId !== hardware_id) {
+      await storage.createActivityLog({
+        licenseId: license.id,
+        serverId: license.serverId,
+        action: "provision_hwid_mismatch",
+        details: `محاولة تفعيل الترخيص ${license_id} من جهاز مختلف. HWID المسجل: ${license.hardwareId.substring(0, 16)}... HWID المرسل: ${hardware_id.substring(0, 16)}...`,
+      });
+      return res.status(403).json({ error: "Hardware ID mismatch - license bound to another device" });
+    }
+
+    if (!license.hardwareId) {
+      await storage.updateLicense(license.id, { hardwareId: hardware_id });
+    }
+
+    await storage.updateLicense(license.id, {
+      lastVerifiedAt: new Date(),
+      status: "active",
+    });
+
+    const payload = buildLicensePayload(
+      license.licenseId,
+      hardware_id,
+      new Date(license.expiresAt),
+      license.maxUsers,
+      license.maxSites,
+      "active"
+    );
+
+    const signature = signLicensePayload(payload);
+
+    await storage.updateLicense(license.id, { signature });
+
+    await storage.createActivityLog({
+      licenseId: license.id,
+      serverId: license.serverId,
+      action: "provision_license",
+      details: `تم تفعيل الترخيص ${license_id} على الجهاز ${hardware_id.substring(0, 16)}...`,
+    });
+
+    res.json({
+      license: payload,
+      signature,
+      public_key: getPublicKey(),
+    });
+  });
+
+  // ─── Verification API (Periodic Check) ───────────────────
+  app.post("/api/verify", async (req, res) => {
+    const { license_id, hardware_id } = req.body;
+
+    if (!license_id || !hardware_id) {
+      return res.status(400).json({ valid: false, error: "license_id and hardware_id are required" });
+    }
+
+    const license = await storage.getLicenseByLicenseId(license_id);
+    if (!license) {
+      return res.status(404).json({ valid: false, error: "License not found" });
+    }
+
+    if (!license.hardwareId) {
+      return res.status(400).json({ valid: false, error: "License not provisioned - run provision.sh first" });
+    }
+
+    if (license.hardwareId !== hardware_id) {
+      await storage.createActivityLog({
+        licenseId: license.id,
+        serverId: license.serverId,
+        action: "verify_hwid_mismatch",
+        details: `فشل التحقق - عدم تطابق HWID للترخيص ${license_id}`,
+      });
+      return res.status(403).json({ valid: false, error: "Hardware ID mismatch" });
+    }
+
+    if (new Date(license.expiresAt) < new Date()) {
+      if (license.status !== "expired") {
+        await storage.updateLicense(license.id, { status: "expired" });
+      }
+      await storage.createActivityLog({
+        licenseId: license.id,
+        serverId: license.serverId,
+        action: "verify_expired",
+        details: `الترخيص ${license_id} منتهي الصلاحية`,
+      });
+      return res.json({ valid: false, status: "expired", error: "License has expired" });
+    }
+
+    if (license.status === "suspended") {
+      await storage.createActivityLog({
+        licenseId: license.id,
+        serverId: license.serverId,
+        action: "verify_suspended",
+        details: `الترخيص ${license_id} موقوف`,
+      });
+      return res.json({ valid: false, status: "suspended", error: "License is suspended" });
+    }
+
+    if (license.status !== "active") {
+      return res.json({ valid: false, status: license.status, error: "License is not active" });
+    }
+
+    await storage.updateLicense(license.id, { lastVerifiedAt: new Date() });
+
+    await storage.createActivityLog({
+      licenseId: license.id,
+      serverId: license.serverId,
+      action: "verify_success",
+      details: `تحقق ناجح للترخيص ${license_id}`,
+    });
+
+    const payload = buildLicensePayload(
+      license.licenseId,
+      hardware_id,
+      new Date(license.expiresAt),
+      license.maxUsers,
+      license.maxSites,
+      license.status
+    );
+
+    const signature = signLicensePayload(payload);
+
+    res.json({
+      valid: true,
+      status: "active",
+      license: payload,
+      signature,
+    });
+  });
+
+  // ─── Public Key Endpoint ─────────────────────────────────
+  app.get("/api/public-key", (_req, res) => {
+    res.type("text/plain").send(getPublicKey());
+  });
+
+  // ─── Provision Script Download ───────────────────────────
+  app.get("/api/provision-script/:licenseId", async (req, res) => {
+    const license = await storage.getLicenseByLicenseId(req.params.licenseId);
+    if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });
+
+    const serverHost = req.get("host") || "localhost:5000";
+    const protocol = req.get("x-forwarded-proto") || req.protocol;
+    const baseUrl = `${protocol === "https" ? "https" : (process.env.NODE_ENV === "production" ? "https" : "http")}://${serverHost}`;
+
+    const script = `#!/bin/bash
+# provision.sh - License Provisioning Script
+# License ID: ${license.licenseId}
+# Generated: $(date)
+
+set -e
+
+LICENSE_ID="${license.licenseId}"
+SERVER_URL="${baseUrl}"
+INSTALL_DIR="/opt/license"
+VERIFY_INTERVAL=21600  # 6 hours in seconds
+
+echo "======================================"
+echo "  License Provisioning System"
+echo "  License: $LICENSE_ID"
+echo "======================================"
+
+# Collect Hardware ID
+echo "[1/5] Collecting hardware fingerprint..."
+MACHINE_ID=$(cat /etc/machine-id 2>/dev/null || echo "")
+PRODUCT_UUID=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
+MAC_ADDR=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
+
+HWID_RAW="\${MACHINE_ID}:\${PRODUCT_UUID}:\${MAC_ADDR}"
+HARDWARE_ID=$(echo -n "$HWID_RAW" | sha256sum | awk '{print $1}')
+echo "  Hardware ID: $HARDWARE_ID"
+
+# Request license from server
+echo "[2/5] Requesting license from server..."
+RESPONSE=$(curl -s -X POST "$SERVER_URL/api/provision" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"license_id\\": \\"$LICENSE_ID\\", \\"hardware_id\\": \\"$HARDWARE_ID\\"}")
+
+# Check for errors
+if echo "$RESPONSE" | grep -q '"error"'; then
+  ERROR=$(echo "$RESPONSE" | grep -o '"error":"[^"]*"' | cut -d'"' -f4)
+  echo "ERROR: $ERROR"
+  exit 1
+fi
+
+# Install license
+echo "[3/5] Installing license..."
+mkdir -p "$INSTALL_DIR"
+
+echo "$RESPONSE" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+with open('$INSTALL_DIR/license.json', 'w') as f:
+    json.dump(data['license'], f, indent=2)
+with open('$INSTALL_DIR/license.sig', 'w') as f:
+    f.write(data['signature'])
+with open('$INSTALL_DIR/public.pem', 'w') as f:
+    f.write(data['public_key'])
+"
+
+echo "  License installed to $INSTALL_DIR/"
+
+# Create verification script
+echo "[4/5] Setting up periodic verification..."
+cat > "$INSTALL_DIR/verify.sh" << 'VERIFY_EOF'
+#!/bin/bash
+LICENSE_ID="${license.licenseId}"
+SERVER_URL="${baseUrl}"
+
+MACHINE_ID=$(cat /etc/machine-id 2>/dev/null || echo "")
+PRODUCT_UUID=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
+MAC_ADDR=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
+HWID_RAW="\${MACHINE_ID}:\${PRODUCT_UUID}:\${MAC_ADDR}"
+HARDWARE_ID=$(echo -n "$HWID_RAW" | sha256sum | awk '{print $1}')
+
+RESULT=$(curl -s -X POST "$SERVER_URL/api/verify" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"license_id\\": \\"$LICENSE_ID\\", \\"hardware_id\\": \\"$HARDWARE_ID\\"}")
+
+VALID=$(echo "$RESULT" | grep -o '"valid":true' || echo "")
+
+if [ -z "$VALID" ]; then
+  STATUS=$(echo "$RESULT" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+  echo "$(date): License verification FAILED - Status: $STATUS" >> /var/log/license-verify.log
+  # Stop the protected service
+  systemctl stop sas_systemmanager 2>/dev/null || true
+  exit 1
+else
+  echo "$(date): License verification OK" >> /var/log/license-verify.log
+fi
+VERIFY_EOF
+chmod +x "$INSTALL_DIR/verify.sh"
+
+# Setup systemd timer for periodic verification
+cat > /etc/systemd/system/license-verify.service << 'SVC_EOF'
+[Unit]
+Description=License Verification Service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/license/verify.sh
+SVC_EOF
+
+cat > /etc/systemd/system/license-verify.timer << 'TMR_EOF'
+[Unit]
+Description=License Verification Timer (every 6 hours)
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TMR_EOF
+
+systemctl daemon-reload
+systemctl enable license-verify.timer
+systemctl start license-verify.timer
+
+echo "[5/5] Running initial verification..."
+bash "$INSTALL_DIR/verify.sh"
+
+echo ""
+echo "======================================"
+echo "  Provisioning Complete!"
+echo "  License: $LICENSE_ID"
+echo "  Hardware: $HARDWARE_ID"
+echo "  Verify every 6 hours: ENABLED"
+echo "======================================"
+`;
+
+    res.setHeader("Content-Type", "text/plain");
+    res.setHeader("Content-Disposition", `attachment; filename="provision_${license.licenseId}.sh"`);
+    res.send(script);
   });
 
   // ─── Dashboard Stats ───────────────────────────────────────

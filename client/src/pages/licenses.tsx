@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -48,6 +48,9 @@ import {
   Server,
   Copy,
   CheckCircle,
+  Download,
+  Edit,
+  Clock,
 } from "lucide-react";
 import type { License, Server as ServerType } from "@shared/schema";
 
@@ -67,6 +70,7 @@ export default function Licenses() {
   const [showCreate, setShowCreate] = useState(false);
   const [showDetails, setShowDetails] = useState<License | null>(null);
   const [showTransfer, setShowTransfer] = useState<License | null>(null);
+  const [showEdit, setShowEdit] = useState<License | null>(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
 
@@ -153,6 +157,26 @@ export default function Licenses() {
       toast({ title: "خطأ", description: err.message, variant: "destructive" });
     },
   });
+
+  const editMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => {
+      const res = await apiRequest("PATCH", `/api/licenses/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/activity-logs"] });
+      setShowEdit(null);
+      toast({ title: "تم تعديل الترخيص بنجاح" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "خطأ", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const downloadProvisionScript = (licenseId: string) => {
+    window.open(`/api/provision-script/${licenseId}`, "_blank");
+  };
 
   const deployMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -258,6 +282,12 @@ export default function Licenses() {
                           <Globe className="h-3 w-3" />
                           {license.maxSites} موقع
                         </span>
+                        {(license as any).lastVerifiedAt && (
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {new Date((license as any).lastVerifiedAt).toLocaleString("ar-IQ")}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -302,6 +332,13 @@ export default function Licenses() {
                           <ArrowRightLeft className="h-4 w-4 ml-2" />
                           نقل لسيرفر آخر
                         </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => setShowEdit(license)}
+                          data-testid={`action-edit-${license.id}`}
+                        >
+                          <Edit className="h-4 w-4 ml-2" />
+                          تعديل البيانات
+                        </DropdownMenuItem>
                         {license.serverId && (
                           <DropdownMenuItem
                             onClick={() => deployMutation.mutate(license.id)}
@@ -311,6 +348,13 @@ export default function Licenses() {
                             نشر على السيرفر
                           </DropdownMenuItem>
                         )}
+                        <DropdownMenuItem
+                          onClick={() => downloadProvisionScript(license.licenseId)}
+                          data-testid={`action-provision-${license.id}`}
+                        >
+                          <Download className="h-4 w-4 ml-2" />
+                          تنزيل سكربت التفعيل
+                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="text-destructive"
@@ -369,6 +413,17 @@ export default function Licenses() {
           }
         }}
         isPending={transferMutation.isPending}
+      />
+
+      <EditLicenseDialog
+        license={showEdit}
+        onClose={() => setShowEdit(null)}
+        onSubmit={(data) => {
+          if (showEdit) {
+            editMutation.mutate({ id: showEdit.id, data });
+          }
+        }}
+        isPending={editMutation.isPending}
       />
     </div>
   );
@@ -554,6 +609,21 @@ function LicenseDetailsDialog({ license, onClose, servers }: {
               label="السيرفر"
               value={server ? `${server.name} (${server.host})` : "غير مرتبط"}
             />
+            <DetailRow
+              label="آخر تحقق"
+              value={
+                <span className="flex items-center gap-1.5">
+                  <Clock className="h-3 w-3" />
+                  {(license as any).lastVerifiedAt
+                    ? new Date((license as any).lastVerifiedAt).toLocaleString("ar-IQ")
+                    : "لم يتم التحقق بعد"}
+                </span>
+              }
+            />
+            <DetailRow
+              label="التوقيع الرقمي"
+              value={(license as any).signature ? "موجود" : "غير موجود"}
+            />
           </div>
           {license.notes && (
             <div className="rounded-md border p-3">
@@ -573,6 +643,102 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
       <span className="text-sm text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">{value}</span>
     </div>
+  );
+}
+
+function EditLicenseDialog({ license, onClose, onSubmit, isPending }: {
+  license: License | null;
+  onClose: () => void;
+  onSubmit: (data: any) => void;
+  isPending: boolean;
+}) {
+  const [form, setForm] = useState({
+    maxUsers: "",
+    maxSites: "",
+    clientId: "",
+    notes: "",
+  });
+
+  useEffect(() => {
+    if (license) {
+      setForm({
+        maxUsers: license.maxUsers.toString(),
+        maxSites: license.maxSites.toString(),
+        clientId: license.clientId || "",
+        notes: license.notes || "",
+      });
+    }
+  }, [license]);
+
+  if (!license) return null;
+
+  return (
+    <Dialog open={!!license} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md" dir="rtl">
+        <DialogHeader>
+          <DialogTitle>تعديل الترخيص</DialogTitle>
+          <DialogDescription>تعديل بيانات الترخيص {license.licenseId}</DialogDescription>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit({
+              maxUsers: parseInt(form.maxUsers),
+              maxSites: parseInt(form.maxSites),
+              clientId: form.clientId || null,
+              notes: form.notes || null,
+            });
+          }}
+          className="space-y-4"
+        >
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>الحد الأقصى للمستخدمين</Label>
+              <Input
+                type="number"
+                value={form.maxUsers}
+                onChange={(e) => setForm({ ...form, maxUsers: e.target.value })}
+                required
+                data-testid="input-edit-max-users"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>الحد الأقصى للمواقع</Label>
+              <Input
+                type="number"
+                value={form.maxSites}
+                onChange={(e) => setForm({ ...form, maxSites: e.target.value })}
+                required
+                data-testid="input-edit-max-sites"
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>معرف العميل</Label>
+            <Input
+              value={form.clientId}
+              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+              placeholder="CLIENT-001"
+              data-testid="input-edit-client-id"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>ملاحظات</Label>
+            <Textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              data-testid="input-edit-notes"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" type="button" onClick={onClose}>إلغاء</Button>
+            <Button type="submit" disabled={isPending} data-testid="button-submit-edit">
+              {isPending ? "جاري الحفظ..." : "حفظ التعديلات"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
