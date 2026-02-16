@@ -1,27 +1,149 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { testSSHConnection, deployLicenseToServer, generateObfuscatedEmulator, generateObfuscatedVerify, DEPLOY } from "./ssh-service";
 import { insertServerSchema, insertLicenseSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
-import type { Request } from "express";
+import bcrypt from "bcryptjs";
+
+const API_DOMAIN = "lic.tecn0link.net";
+
+function requireHttps(req: Request, res: Response, next: NextFunction) {
+  const proto = req.get("x-forwarded-proto") || req.protocol;
+  if (proto !== "https" && process.env.NODE_ENV === "production") {
+    return res.status(403).json({ error: "HTTPS required" });
+  }
+  next();
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (!req.session?.userId) {
+    return res.status(401).json({ message: "غير مصرح" });
+  }
+  next();
+}
+
+async function ensureDefaultAdmin() {
+  const count = await storage.getUserCount();
+  if (count === 0) {
+    const hashed = await bcrypt.hash("admin", 10);
+    await storage.createUser({ username: "admin", password: hashed });
+    console.log("Default admin created: admin / admin");
+  }
+}
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
 
-  function getBaseUrl(req: Request): string {
-    const host = req.get("host") || "localhost:5000";
-    const proto = req.get("x-forwarded-proto") || req.protocol;
-    const protocol = proto === "https" ? "https" : (process.env.NODE_ENV === "production" ? "https" : "http");
-    return `${protocol}://${host}`;
+  await ensureDefaultAdmin();
+
+  function getBaseUrl(_req: Request): string {
+    return `https://${API_DOMAIN}`;
   }
 
   function sanitizeServer(server: any) {
     const { password, ...safe } = server;
     return { ...safe, password: "********" };
   }
+
+  // ─── HTTPS enforcement for public API ──────────────────────
+  app.use("/api/provision", requireHttps);
+  app.use("/api/verify", requireHttps);
+  app.use("/api/license-blob", requireHttps);
+  app.use("/api/provision-script", requireHttps);
+
+  // ─── Auth Routes (public) ─────────────────────────────────
+  app.post("/api/auth/login", async (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ message: "اسم المستخدم وكلمة المرور مطلوبان" });
+    }
+
+    const user = await storage.getUserByUsername(username);
+    if (!user) {
+      return res.status(401).json({ message: "اسم المستخدم أو كلمة المرور غير صحيحة" });
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      return res.status(401).json({ message: "اسم المستخدم أو كلمة المرور غير صحيحة" });
+    }
+
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    res.json({ id: user.id, username: user.username });
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.json({ success: true });
+    });
+  });
+
+  app.get("/api/auth/me", (req, res) => {
+    if (!req.session?.userId) {
+      return res.status(401).json({ message: "غير مصرح" });
+    }
+    res.json({ id: req.session.userId, username: req.session.username });
+  });
+
+  app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "كلمة المرور الحالية والجديدة مطلوبتان" });
+    }
+    if (newPassword.length < 4) {
+      return res.status(400).json({ message: "كلمة المرور الجديدة قصيرة جداً" });
+    }
+
+    const user = await storage.getUser(req.session.userId!);
+    if (!user) return res.status(404).json({ message: "المستخدم غير موجود" });
+
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) {
+      return res.status(401).json({ message: "كلمة المرور الحالية غير صحيحة" });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await storage.updateUserPassword(user.id, hashed);
+    res.json({ success: true });
+  });
+
+  app.post("/api/auth/change-username", requireAuth, async (req, res) => {
+    const { newUsername, password } = req.body;
+    if (!newUsername || !password) {
+      return res.status(400).json({ message: "اسم المستخدم الجديد وكلمة المرور مطلوبان" });
+    }
+
+    const user = await storage.getUser(req.session.userId!);
+    if (!user) return res.status(404).json({ message: "المستخدم غير موجود" });
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      return res.status(401).json({ message: "كلمة المرور غير صحيحة" });
+    }
+
+    const existing = await storage.getUserByUsername(newUsername);
+    if (existing && existing.id !== user.id) {
+      return res.status(409).json({ message: "اسم المستخدم مستخدم بالفعل" });
+    }
+
+    const { db } = await import("./db");
+    const { users } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+    await db.update(users).set({ username: newUsername }).where(eq(users.id, user.id));
+    req.session.username = newUsername;
+    res.json({ success: true });
+  });
+
+  // ─── Protected Admin Routes ───────────────────────────────
+  app.use("/api/servers", requireAuth);
+  app.use("/api/licenses", requireAuth);
+  app.use("/api/activity-logs", requireAuth);
+  app.use("/api/stats", requireAuth);
+  app.use("/api/backup", requireAuth);
 
   // ─── Servers ────────────────────────────────────────────────
   app.get("/api/servers", async (_req, res) => {
@@ -185,7 +307,6 @@ export async function registerRoutes(
             status, getBaseUrl(req)
           );
         } catch (e) {
-          // Log deployment error but don't fail the status update
         }
       }
     }
@@ -253,7 +374,6 @@ export async function registerRoutes(
           license.status, getBaseUrl(req)
         );
       } catch (e) {
-        // Deployment error logged separately
       }
     }
 
@@ -353,7 +473,84 @@ export async function registerRoutes(
     res.json(updated);
   });
 
-  // ─── Provisioning API (Client → Server) ──────────────────
+  // ─── Backup / Restore ─────────────────────────────────────
+  app.get("/api/backup/export", async (_req, res) => {
+    const [serversList, licenseList, logs] = await Promise.all([
+      storage.getServers(),
+      storage.getLicenses(),
+      storage.getActivityLogs(),
+    ]);
+
+    const backup = {
+      version: "1.0",
+      exportedAt: new Date().toISOString(),
+      servers: serversList,
+      licenses: licenseList,
+      activityLogs: logs,
+    };
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="license-backup-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json(backup);
+  });
+
+  app.post("/api/backup/import", async (req, res) => {
+    const { servers: srvData, licenses: licData } = req.body;
+    if (!srvData && !licData) {
+      return res.status(400).json({ message: "لا توجد بيانات للاستيراد" });
+    }
+
+    let importedServers = 0;
+    let importedLicenses = 0;
+
+    if (srvData && Array.isArray(srvData)) {
+      for (const srv of srvData) {
+        try {
+          const existing = await storage.getServer(srv.id);
+          if (!existing) {
+            await storage.createServer({
+              name: srv.name,
+              host: srv.host,
+              port: srv.port,
+              username: srv.username,
+              password: srv.password,
+            });
+            importedServers++;
+          }
+        } catch (e) {}
+      }
+    }
+
+    if (licData && Array.isArray(licData)) {
+      for (const lic of licData) {
+        try {
+          const existing = await storage.getLicenseByLicenseId(lic.licenseId);
+          if (!existing) {
+            await storage.createLicense({
+              licenseId: lic.licenseId,
+              serverId: lic.serverId,
+              expiresAt: new Date(lic.expiresAt),
+              maxUsers: lic.maxUsers,
+              maxSites: lic.maxSites,
+              clientId: lic.clientId,
+              notes: lic.notes,
+              signature: lic.signature,
+            });
+            importedLicenses++;
+          }
+        } catch (e) {}
+      }
+    }
+
+    await storage.createActivityLog({
+      action: "import_backup",
+      details: `تم استيراد نسخة احتياطية: ${importedServers} سيرفر، ${importedLicenses} ترخيص`,
+    });
+
+    res.json({ success: true, importedServers, importedLicenses });
+  });
+
+  // ─── Provisioning API (Client → Server) - PUBLIC ──────────
   app.post("/api/provision", async (req, res) => {
     const { license_id, hardware_id } = req.body;
 
@@ -433,7 +630,7 @@ export async function registerRoutes(
     });
   });
 
-  // ─── Verification API (Periodic Check) ───────────────────
+  // ─── Verification API (Periodic Check) - PUBLIC ───────────
   app.post("/api/verify", async (req, res) => {
     const { license_id, hardware_id } = req.body;
 
@@ -515,7 +712,7 @@ export async function registerRoutes(
     });
   });
 
-  // ─── SAS4 Encrypted Blob Endpoint ──────────────────────
+  // ─── SAS4 Encrypted Blob Endpoint - PUBLIC ──────────────
   app.get("/api/license-blob/:licenseId", async (req, res) => {
     const license = await storage.getLicenseByLicenseId(req.params.licenseId);
     if (!license) return res.status(404).json({ error: "License not found" });
@@ -534,7 +731,7 @@ export async function registerRoutes(
     res.type("text/plain").send(encrypted);
   });
 
-  // ─── Provision Script Download ───────────────────────────
+  // ─── Provision Script Download - PUBLIC ───────────────────
   app.get("/api/provision-script/:licenseId", async (req, res) => {
     const license = await storage.getLicenseByLicenseId(req.params.licenseId);
     if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });

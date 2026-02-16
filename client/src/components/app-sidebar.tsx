@@ -1,5 +1,7 @@
-import { LayoutDashboard, Key, Server, ScrollText, Shield } from "lucide-react";
+import { LayoutDashboard, Key, Server, ScrollText, Shield, Settings, LogOut } from "lucide-react";
 import { useLocation, Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   Sidebar,
   SidebarContent,
@@ -12,16 +14,30 @@ import {
   SidebarHeader,
   SidebarFooter,
 } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
 
 const menuItems = [
   { title: "لوحة التحكم", url: "/", icon: LayoutDashboard },
   { title: "التراخيص", url: "/licenses", icon: Key },
   { title: "السيرفرات", url: "/servers", icon: Server },
   { title: "سجل النشاط", url: "/activity", icon: ScrollText },
+  { title: "الإعدادات", url: "/settings", icon: Settings },
 ];
 
 export function AppSidebar() {
   const [location] = useLocation();
+  const { data: user } = useQuery<{ id: string; username: string } | null>({
+    queryKey: ["/api/auth/me"],
+    staleTime: Infinity,
+  });
+
+  const handleLogout = async () => {
+    try {
+      await apiRequest("POST", "/api/auth/logout");
+    } catch {}
+    queryClient.setQueryData(["/api/auth/me"], null);
+    queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+  };
 
   return (
     <Sidebar side="right">
@@ -58,7 +74,15 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-4">
+      <SidebarFooter className="p-4 space-y-2">
+        {user && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground truncate">{user.username}</span>
+            <Button variant="ghost" size="icon" onClick={handleLogout} data-testid="button-logout">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
         <div className="text-xs text-muted-foreground text-center">
           v1.0.0 - Secure License System
         </div>

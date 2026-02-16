@@ -4,12 +4,15 @@ import {
   servers,
   licenses,
   activityLogs,
+  users,
   type Server,
   type InsertServer,
   type License,
   type InsertLicense,
   type ActivityLog,
   type InsertActivityLog,
+  type User,
+  type InsertUser,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -28,6 +31,12 @@ export interface IStorage {
 
   getActivityLogs(): Promise<ActivityLog[]>;
   createActivityLog(data: InsertActivityLog): Promise<ActivityLog>;
+
+  getUserByUsername(username: string): Promise<User | undefined>;
+  getUser(id: string): Promise<User | undefined>;
+  createUser(data: InsertUser): Promise<User>;
+  updateUserPassword(id: string, password: string): Promise<void>;
+  getUserCount(): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -89,6 +98,30 @@ export class DatabaseStorage implements IStorage {
   async createActivityLog(data: InsertActivityLog): Promise<ActivityLog> {
     const [log] = await db.insert(activityLogs).values(data).returning();
     return log;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
+  }
+
+  async getUser(id: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async createUser(data: InsertUser): Promise<User> {
+    const [user] = await db.insert(users).values(data).returning();
+    return user;
+  }
+
+  async updateUserPassword(id: string, password: string): Promise<void> {
+    await db.update(users).set({ password }).where(eq(users.id, id));
+  }
+
+  async getUserCount(): Promise<number> {
+    const result = await db.select().from(users);
+    return result.length;
   }
 }
 
