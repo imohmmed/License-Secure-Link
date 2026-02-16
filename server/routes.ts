@@ -430,23 +430,12 @@ export async function registerRoutes(
     const license = await storage.getLicense(req.params.id);
     if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });
 
-    if (license.serverId) {
-      const server = await storage.getServer(license.serverId);
-      if (server) {
-        try {
-          await undeployLicenseFromServer(server.host, server.port, server.username, server.password);
-        } catch (e) {
-          console.error("Failed to undeploy from server:", e);
-        }
-      }
-    }
-
-    await storage.deleteLicense(req.params.id);
+    await storage.updateLicenseStatus(req.params.id, "suspended");
     await storage.createActivityLog({
-      licenseId: null,
-      serverId: null,
-      action: "delete_license",
-      details: `تم حذف الترخيص ${license.licenseId} وإيقافه من السيرفر`,
+      licenseId: license.licenseId,
+      serverId: license.serverId,
+      action: "suspend_license",
+      details: `تم تعطيل الترخيص ${license.licenseId} - الملفات باقية على السيرفر`,
     });
     res.json({ success: true });
   });
