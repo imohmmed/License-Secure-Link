@@ -256,9 +256,9 @@ export async function registerRoutes(
 
     const license = await storage.createLicense(parsed.data);
 
-    if (hardwareId) {
-      await storage.updateLicense(license.id, { hardwareId });
-    }
+    const updateData: any = { status: "active" };
+    if (hardwareId) updateData.hardwareId = hardwareId;
+    await storage.updateLicense(license.id, updateData);
 
     await storage.createActivityLog({
       licenseId: license.id,

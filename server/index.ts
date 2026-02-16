@@ -5,6 +5,7 @@ import pg from "pg";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { storage } from "./storage";
 
 const app = express();
 const httpServer = createServer(app);
@@ -114,6 +115,30 @@ app.use((req, res, next) => {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
+
+  async function checkExpiredLicenses() {
+    try {
+      const allLicenses = await storage.getLicenses();
+      const now = new Date();
+      for (const license of allLicenses) {
+        if (license.status === "active" && new Date(license.expiresAt) < now) {
+          await storage.updateLicense(license.id, { status: "expired" });
+          await storage.createActivityLog({
+            licenseId: license.id,
+            serverId: license.serverId,
+            action: "auto_expire",
+            details: `تم إيقاف الترخيص ${license.licenseId} تلقائياً - انتهت صلاحيته`,
+          });
+          log(`License ${license.licenseId} auto-expired`);
+        }
+      }
+    } catch (e) {
+      console.error("Error checking expired licenses:", e);
+    }
+  }
+
+  checkExpiredLicenses();
+  setInterval(checkExpiredLicenses, 60 * 60 * 1000);
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.
