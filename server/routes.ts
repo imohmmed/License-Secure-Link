@@ -692,7 +692,7 @@ export async function registerRoutes(
 
   // ─── Verification API (Periodic Check) - PUBLIC ───────────
   app.post("/api/verify", async (req, res) => {
-    const { license_id, hardware_id } = req.body;
+    const { license_id, hardware_id, server_ip } = req.body;
 
     if (!license_id || !hardware_id) {
       return res.status(400).json({ valid: false, error: "license_id and hardware_id are required" });
@@ -701,6 +701,19 @@ export async function registerRoutes(
     const license = await storage.getLicenseByLicenseId(license_id);
     if (!license) {
       return res.status(404).json({ valid: false, error: "License not found" });
+    }
+
+    if (server_ip && license.serverId) {
+      const server = await storage.getServer(license.serverId);
+      if (server && server.host !== server_ip) {
+        await storage.createActivityLog({
+          licenseId: license.id,
+          serverId: license.serverId,
+          action: "verify_ip_mismatch",
+          details: `فشل التحقق - IP غير مطابق: ${server_ip} بدل ${server.host} للترخيص ${license_id}`,
+        });
+        return res.status(403).json({ valid: false, error: "Server IP mismatch" });
+      }
     }
 
     if (!license.hardwareId) {
@@ -807,6 +820,17 @@ export async function registerRoutes(
         await storage.updateLicense(license.id, { status: "expired" });
       }
       return res.status(403).json({ s: "0" });
+    }
+
+    if (license.serverId) {
+      const server = await storage.getServer(license.serverId);
+      if (server) {
+        const reqIp = (req.headers['x-forwarded-for'] as string || '').split(',')[0].trim() || req.ip || '';
+        const cleanReqIp = reqIp.replace(/^::ffff:/, '');
+        if (cleanReqIp && server.host !== cleanReqIp) {
+          return res.status(403).json({ s: "0" });
+        }
+      }
     }
 
     const payload = buildSAS4Payload(
