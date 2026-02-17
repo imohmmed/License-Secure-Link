@@ -388,6 +388,8 @@ export async function registerRoutes(
     }
     await storage.updateLicense(license.id, updateData);
 
+    const patchIdForUpdate = patchData?.id;
+
     if (patchData) {
       await storage.updatePatchToken(patchData.id, {
         licenseId: license.id,
@@ -431,6 +433,9 @@ export async function registerRoutes(
           if (result.success) {
             if (result.computedHwid) {
               await storage.updateLicense(license.id, { hardwareId: result.computedHwid });
+              if (patchIdForUpdate) {
+                await storage.updatePatchToken(patchIdForUpdate, { hardwareId: result.computedHwid });
+              }
             }
             const finalDeployHwid = result.computedHwid || deployHwid;
             await storage.createActivityLog({
@@ -647,6 +652,14 @@ export async function registerRoutes(
       if (license.status === "inactive") updates.status = "active";
       if (Object.keys(updates).length > 0) {
         await storage.updateLicense(req.params.id, updates);
+      }
+
+      if (result.computedHwid) {
+        const allPatches = await storage.getPatchTokens();
+        const linkedPatch = allPatches.find(p => p.licenseId === license.id);
+        if (linkedPatch) {
+          await storage.updatePatchToken(linkedPatch.id, { hardwareId: result.computedHwid });
+        }
       }
 
       const xorKeyExample = `Gr3nd1z3r${new Date().getHours() + 1}`;
