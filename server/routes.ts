@@ -880,7 +880,7 @@ export async function registerRoutes(
     let serverHost = "";
     if (license.serverId) {
       const server = await storage.getServer(license.serverId);
-      if (server) serverHost = server.host;
+      if (server) serverHost = await resolveHostToIp(server.host);
     }
 
     const baseUrl = getBaseUrl(req);
