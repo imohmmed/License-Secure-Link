@@ -169,7 +169,15 @@ shared/
 - Import: Uploads JSON file, adds only missing servers/licenses (non-destructive)
 - Accessible from Settings page
 
-## Recent Changes (Feb 16, 2026)
+## Recent Changes (Feb 17, 2026)
+- IP-based protection: server-side IP validation using `req.ip` (trust proxy enabled)
+- DNS resolution: domains resolved to IP via `dns.resolve4` with 5-minute cache for comparison
+- Fail-closed security: missing IP or failed DNS resolution = request denied
+- Both `/api/license-data` and `/api/verify` enforce IP match against registered server host
+- Removed client-side IP detection from emulator and verify scripts (server-side only)
+- Host:port format handled (port stripped before resolution)
+
+## Previous Changes (Feb 16, 2026)
 - Added admin authentication (login page, session protection, credential management)
 - Added settings page (change username/password, backup/restore)
 - Added backup/restore system (export/import JSON)

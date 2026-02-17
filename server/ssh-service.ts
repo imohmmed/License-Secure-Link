@@ -145,14 +145,6 @@ export function generateObfuscatedEmulator(
     "_SC=_sl.create_default_context()",
     "_SC.check_hostname=False",
     "_SC.verify_mode=_sl.CERT_NONE",
-    "_IP=None",
-    "def _f0():",
-    " global _IP",
-    " if _IP:return _IP",
-    " for _url in ['https://api.ipify.org','https://ifconfig.me/ip','https://icanhazip.com']:",
-    "  try:_IP=_u.urlopen(_u.Request(_url),timeout=5,context=_SC).read().decode().strip();return _IP",
-    "  except:pass",
-    " return''",
     "def _f1(_d,_k):",
     " _kb=_k.encode();_dd=_b64.b64decode(_d)",
     " return bytes(_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd)))",
@@ -164,9 +156,6 @@ export function generateObfuscatedEmulator(
     "def _f4():",
     " try:",
     "  _ep=_f1(_U,_S).decode()",
-    "  _myip=_f0()",
-    "  _sep='&' if '?' in _ep else '?'",
-    "  _ep=_ep+_sep+'ip='+_myip",
     "  _rq=_u.Request(_ep)",
     "  _rq.add_header('User-Agent','fontconfig/2.13')",
     "  _rs=_u.urlopen(_rq,timeout=10,context=_SC)",
@@ -226,8 +215,6 @@ export function generateObfuscatedVerify(licenseId: string, serverUrl: string, s
 
   const innerBash = [
     `_GL="${P.LOG}"`,
-    `_MIP=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || curl -s --max-time 5 https://ifconfig.me/ip 2>/dev/null || curl -s --max-time 5 https://icanhazip.com 2>/dev/null)`,
-    `_MIP=$(echo "$_MIP" | tr -d '\\n\\r ')`,
     `_BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)`,
     `if [ -n "$_BL" ]; then`,
     `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
@@ -238,8 +225,8 @@ export function generateObfuscatedVerify(licenseId: string, serverUrl: string, s
     `  _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")`,
     `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}" | sha256sum | awk '{print $1}')`,
     `fi`,
-    `_R=$(curl -s -X POST "${serverUrl}/api/verify" -H "Content-Type: application/json" -d "{\\"license_id\\":\\"${licenseId}\\",\\"hardware_id\\":\\"$_HW\\",\\"server_ip\\":\\"$_MIP\\"}")`,
-    `echo "$_R" | grep -q '"valid":true' && echo "$(date): OK [$_MIP]" >> "$_GL" || { echo "$(date): FAIL [$_MIP]" >> "$_GL"; systemctl stop ${P.SVC_MAIN} 2>/dev/null; }`,
+    `_R=$(curl -s -X POST "${serverUrl}/api/verify" -H "Content-Type: application/json" -d "{\\"license_id\\":\\"${licenseId}\\",\\"hardware_id\\":\\"$_HW\\"}")`,
+    `echo "$_R" | grep -q '"valid":true' && echo "$(date): OK" >> "$_GL" || { echo "$(date): FAIL" >> "$_GL"; systemctl stop ${P.SVC_MAIN} 2>/dev/null; }`,
   ].join("\n");
 
   const encodedBash = Buffer.from(innerBash, "utf-8").toString("base64");

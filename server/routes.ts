@@ -5,8 +5,30 @@ import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, ge
 import { insertServerSchema, insertLicenseSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 import bcrypt from "bcryptjs";
+import dns from "dns";
+import { promisify } from "util";
+
+const dnsResolve = promisify(dns.resolve4);
 
 const API_DOMAIN = "lic.tecn0link.net";
+
+const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+const resolvedIpCache = new Map<string, { ip: string; ts: number }>();
+
+async function resolveHostToIp(host: string): Promise<string> {
+  const cleanHost = host.split(':')[0].trim();
+  if (ipRegex.test(cleanHost)) return cleanHost;
+  const cached = resolvedIpCache.get(cleanHost);
+  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.ip;
+  try {
+    const addresses = await dnsResolve(cleanHost);
+    if (addresses && addresses.length > 0) {
+      resolvedIpCache.set(cleanHost, { ip: addresses[0], ts: Date.now() });
+      return addresses[0];
+    }
+  } catch {}
+  return '';
+}
 
 function requireHttps(req: Request, res: Response, next: NextFunction) {
   const proto = req.get("x-forwarded-proto") || req.protocol;
@@ -692,7 +714,7 @@ export async function registerRoutes(
 
   // ─── Verification API (Periodic Check) - PUBLIC ───────────
   app.post("/api/verify", async (req, res) => {
-    const { license_id, hardware_id, server_ip } = req.body;
+    const { license_id, hardware_id } = req.body;
 
     if (!license_id || !hardware_id) {
       return res.status(400).json({ valid: false, error: "license_id and hardware_id are required" });
@@ -703,16 +725,23 @@ export async function registerRoutes(
       return res.status(404).json({ valid: false, error: "License not found" });
     }
 
-    if (server_ip && license.serverId) {
+    if (license.serverId) {
       const server = await storage.getServer(license.serverId);
-      if (server && server.host !== server_ip) {
-        await storage.createActivityLog({
-          licenseId: license.id,
-          serverId: license.serverId,
-          action: "verify_ip_mismatch",
-          details: `فشل التحقق - IP غير مطابق: ${server_ip} بدل ${server.host} للترخيص ${license_id}`,
-        });
-        return res.status(403).json({ valid: false, error: "Server IP mismatch" });
+      if (server) {
+        const cleanReqIp = (req.ip || '').replace(/^::ffff:/, '');
+        if (!cleanReqIp) {
+          return res.status(403).json({ valid: false, error: "Cannot determine request IP" });
+        }
+        const serverIp = await resolveHostToIp(server.host);
+        if (!ipRegex.test(serverIp) || serverIp !== cleanReqIp) {
+          await storage.createActivityLog({
+            licenseId: license.id,
+            serverId: license.serverId,
+            action: "verify_ip_mismatch",
+            details: `فشل التحقق - IP غير مطابق: ${cleanReqIp} بدل ${serverIp} للترخيص ${license_id}`,
+          });
+          return res.status(403).json({ valid: false, error: "Server IP mismatch" });
+        }
       }
     }
 
@@ -825,9 +854,12 @@ export async function registerRoutes(
     if (license.serverId) {
       const server = await storage.getServer(license.serverId);
       if (server) {
-        const reqIp = (req.headers['x-forwarded-for'] as string || '').split(',')[0].trim() || req.ip || '';
-        const cleanReqIp = reqIp.replace(/^::ffff:/, '');
-        if (cleanReqIp && server.host !== cleanReqIp) {
+        const cleanReqIp = (req.ip || '').replace(/^::ffff:/, '');
+        if (!cleanReqIp) {
+          return res.status(403).json({ s: "0" });
+        }
+        const serverIp = await resolveHostToIp(server.host);
+        if (!ipRegex.test(serverIp) || serverIp !== cleanReqIp) {
           return res.status(403).json({ s: "0" });
         }
       }
