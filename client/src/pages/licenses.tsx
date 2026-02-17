@@ -86,11 +86,18 @@ export default function Licenses() {
       const res = await apiRequest("POST", "/api/licenses", data);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       setShowCreate(false);
-      toast({ title: "تم إنشاء الترخيص بنجاح" });
+      if (data?.deployResult?.success) {
+        toast({ title: "تم إنشاء الترخيص ونشره على السيرفر بنجاح" });
+      } else if (data?.deployResult && !data.deployResult.success) {
+        toast({ title: "تم إنشاء الترخيص", description: `فشل النشر التلقائي: ${data.deployResult.error || "خطأ غير معروف"} - يمكنك النشر يدوياً`, variant: "destructive" });
+      } else {
+        toast({ title: "تم إنشاء الترخيص بنجاح" });
+      }
     },
     onError: (err: Error) => {
       toast({ title: "خطأ", description: err.message, variant: "destructive" });

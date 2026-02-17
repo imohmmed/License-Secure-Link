@@ -295,8 +295,34 @@ export async function registerRoutes(
       details: `تم إنشاء الترخيص ${parsed.data.licenseId}`,
     });
 
+    let deployResult = null;
+    if (parsed.data.serverId) {
+      const server = await storage.getServer(parsed.data.serverId);
+      if (server && hardwareId) {
+        try {
+          const result = await deployLicenseToServer(
+            server.host, server.port, server.username, server.password,
+            hardwareId, parsed.data.licenseId,
+            new Date(parsed.data.expiresAt), parsed.data.maxUsers ?? 1000, parsed.data.maxSites ?? 1,
+            "active", getBaseUrl(req)
+          );
+          deployResult = result;
+          if (result.success) {
+            await storage.createActivityLog({
+              licenseId: license.id,
+              serverId: parsed.data.serverId,
+              action: "deploy_license",
+              details: `تم نشر الترخيص ${parsed.data.licenseId} تلقائياً على السيرفر ${server.name}`,
+            });
+          }
+        } catch (e) {
+          deployResult = { success: false, error: "فشل النشر التلقائي" };
+        }
+      }
+    }
+
     const updatedLicense = await storage.getLicense(license.id);
-    res.json(updatedLicense);
+    res.json({ ...updatedLicense, deployResult });
   });
 
   app.patch("/api/licenses/:id/status", async (req, res) => {
