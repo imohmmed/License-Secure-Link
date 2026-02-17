@@ -1413,7 +1413,7 @@ echo "Installation completed successfully"
   app.get("/api/patches/available", async (_req, res) => {
     const allPatches = await storage.getPatchTokens();
     const available = allPatches.filter(
-      (p) => p.status === "used" && !p.licenseId && p.serverId
+      (p) => p.status === "used" && !p.licenseId && p.hardwareId
     );
     res.json(available);
   });
