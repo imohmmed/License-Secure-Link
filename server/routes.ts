@@ -253,6 +253,10 @@ export async function registerRoutes(
     }
 
     if (parsed.data.serverId) {
+      const server = await storage.getServer(parsed.data.serverId);
+      if (!server) {
+        return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
+      }
       const serverLicenses = await storage.getLicensesByServerId(parsed.data.serverId);
       if (serverLicenses.length > 0) {
         return res.status(409).json({ message: "لديك ترخيص مسبق على هذا السيرفر - لا يمكن إنشاء ترخيص آخر لنفس السيرفر" });
