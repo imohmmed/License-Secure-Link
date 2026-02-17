@@ -47,7 +47,7 @@ export async function testSSHConnection(
 
     conn.on("ready", () => {
       conn.exec(
-        "cat /sys/class/dmi/id/product_uuid 2>/dev/null || cat /etc/machine-id 2>/dev/null || hostname",
+        `_MI=$(cat /etc/machine-id 2>/dev/null || echo ""); _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo ""); _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo ""); _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo ""); _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo ""); _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo ""); _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo ""); echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print $1}'`,
         (err, stream) => {
           if (err) {
             clearTimeout(timeout);
@@ -212,12 +212,14 @@ function generateHwidCapturePy(): string {
   return Buffer.from(py, "utf-8").toString("base64");
 }
 
-export function generateObfuscatedVerify(licenseId: string, serverUrl: string, serverHost?: string): string {
+export function generateObfuscatedVerify(licenseId: string, serverUrl: string, serverHost?: string, hwidSalt?: string): string {
   const P = DEPLOY;
   const hwidPyB64 = generateHwidCapturePy();
 
+  const saltStr = hwidSalt || '';
   const innerBash = [
     `_GL="${P.LOG}"`,
+    `_HS="${saltStr}"`,
     `_BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)`,
     `if [ -n "$_BL" ]; then`,
     `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
@@ -226,7 +228,11 @@ export function generateObfuscatedVerify(licenseId: string, serverUrl: string, s
     `  _MI=$(cat /etc/machine-id 2>/dev/null || echo "")`,
     `  _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")`,
     `  _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")`,
-    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}" | sha256sum | awk '{print $1}')`,
+    `  _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")`,
+    `  _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")`,
+    `  _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")`,
+    `  _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")`,
+    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print $1}')`,
     `fi`,
     `_R=$(curl -s -X POST "${serverUrl}/api/verify" -H "Content-Type: application/json" -d "{\\"license_id\\":\\"${licenseId}\\",\\"hardware_id\\":\\"$_HW\\"}")`,
     `echo "$_R" | grep -q '"valid":true' && echo "$(date): OK" >> "$_GL" || { echo "$(date): FAIL" >> "$_GL"; systemctl stop ${P.SVC_MAIN} 2>/dev/null; }`,
@@ -260,10 +266,10 @@ export function generateLicenseFileContent(
 export async function deployLicenseToServer(
   host: string, port: number, username: string, password: string,
   hardwareId: string, licenseId: string, expiresAt: Date,
-  maxUsers: number, maxSites: number, status: string, serverUrl: string
+  maxUsers: number, maxSites: number, status: string, serverUrl: string, hwidSalt?: string
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const emulator = generateObfuscatedEmulator(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status, serverUrl);
-  const verify = generateObfuscatedVerify(licenseId, serverUrl, host);
+  const verify = generateObfuscatedVerify(licenseId, serverUrl, host, hwidSalt);
   const P = DEPLOY;
 
   const deployScript = `#!/bin/bash

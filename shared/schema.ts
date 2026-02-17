@@ -23,6 +23,7 @@ export const licenses = pgTable("licenses", {
   licenseId: text("license_id").notNull().unique(),
   serverId: varchar("server_id").references(() => servers.id),
   hardwareId: text("hardware_id"),
+  hwidSalt: text("hwid_salt"),
   status: licenseStatusEnum("status").notNull().default("inactive"),
   expiresAt: timestamp("expires_at").notNull(),
   maxUsers: integer("max_users").notNull().default(100),

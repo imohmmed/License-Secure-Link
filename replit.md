@@ -170,6 +170,11 @@ shared/
 - Accessible from Settings page
 
 ## Recent Changes (Feb 17, 2026)
+- **Enhanced HWID fingerprinting**: 7 hardware sources (machine-id, product_uuid, MAC, board_serial, chassis_serial, disk_serial, CPU/product_serial) combined via SHA256
+- **Per-license salt (hwidSalt)**: Random 32-char hex salt generated per license, included in HWID hash computation - even if someone clones hardware IDs, different salt per license prevents cross-license HWID reuse
+- **Salt embedded in scripts**: Both install script and verify script contain the license-specific salt for consistent HWID computation
+- **Suspended = disabled mode**: Verify endpoint returns valid:true for suspended licenses (keeps emulator running in st=0 disabled mode), expired licenses return valid:false (emulator stops)
+- **License-data expired handling**: Expired licenses return 403 (full block), suspended return data with st=0 (disabled/read-only)
 - IP-based protection: server-side IP validation using `req.ip` (trust proxy enabled)
 - DNS resolution: domains resolved to IP via `dns.resolve4` with 5-minute cache for comparison
 - Fail-closed security: missing IP or failed DNS resolution = request denied

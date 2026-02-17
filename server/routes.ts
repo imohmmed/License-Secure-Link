@@ -5,6 +5,7 @@ import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, ge
 import { insertServerSchema, insertLicenseSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import dns from "dns";
 import { promisify } from "util";
 
@@ -296,18 +297,10 @@ export async function registerRoutes(
       }
     }
 
-    let hardwareId: string | null = null;
-    if (parsed.data.serverId) {
-      const server = await storage.getServer(parsed.data.serverId);
-      if (server?.hardwareId) {
-        hardwareId = server.hardwareId;
-      }
-    }
-
     const license = await storage.createLicense(parsed.data);
 
-    const updateData: any = { status: "active" };
-    if (hardwareId) updateData.hardwareId = hardwareId;
+    const hwidSalt = crypto.randomBytes(16).toString("hex");
+    const updateData: any = { status: "active", hwidSalt };
     await storage.updateLicense(license.id, updateData);
 
     await storage.createActivityLog({
@@ -320,13 +313,13 @@ export async function registerRoutes(
     let deployResult = null;
     if (parsed.data.serverId) {
       const server = await storage.getServer(parsed.data.serverId);
-      if (server && hardwareId) {
+      if (server && server.hardwareId) {
         try {
           const result = await deployLicenseToServer(
             server.host, server.port, server.username, server.password,
-            hardwareId, parsed.data.licenseId,
+            server.hardwareId, parsed.data.licenseId,
             new Date(parsed.data.expiresAt), parsed.data.maxUsers ?? 1000, parsed.data.maxSites ?? 1,
-            "active", getBaseUrl(req)
+            "active", getBaseUrl(req), hwidSalt
           );
           deployResult = result;
           if (result.success) {
@@ -380,7 +373,7 @@ export async function registerRoutes(
             server.host, server.port, server.username, server.password,
             license.hardwareId, license.licenseId,
             new Date(license.expiresAt), license.maxUsers, license.maxSites,
-            status, getBaseUrl(req)
+            status, getBaseUrl(req), license.hwidSalt || undefined
           );
         } catch (e) {
         }
@@ -453,7 +446,7 @@ export async function registerRoutes(
           newServer.host, newServer.port, newServer.username, newServer.password,
           newHardwareId, license.licenseId,
           new Date(license.expiresAt), license.maxUsers, license.maxSites,
-          license.status, getBaseUrl(req)
+          license.status, getBaseUrl(req), license.hwidSalt || undefined
         );
       } catch (e) {
       }
@@ -473,12 +466,18 @@ export async function registerRoutes(
     const hwid = license.hardwareId || server.hardwareId;
     if (!hwid) return res.status(400).json({ message: "لا يوجد Hardware ID - اختبر الاتصال بالسيرفر أولاً" });
 
+    if (!license.hwidSalt) {
+      const salt = crypto.randomBytes(16).toString("hex");
+      await storage.updateLicense(license.id, { hwidSalt: salt });
+      license.hwidSalt = salt;
+    }
+
     const deployStatus = license.status === "inactive" ? "active" : license.status;
     const result = await deployLicenseToServer(
       server.host, server.port, server.username, server.password,
       hwid, license.licenseId,
       new Date(license.expiresAt), license.maxUsers, license.maxSites,
-      deployStatus, getBaseUrl(req)
+      deployStatus, getBaseUrl(req), license.hwidSalt
     );
 
     if (result.success) {
@@ -652,6 +651,12 @@ export async function registerRoutes(
       return res.status(403).json({ error: "License has expired", status: "expired" });
     }
 
+    if (!license.hwidSalt) {
+      const salt = crypto.randomBytes(16).toString("hex");
+      await storage.updateLicense(license.id, { hwidSalt: salt });
+      license.hwidSalt = salt;
+    }
+
     if (license.hardwareId && license.hardwareId !== hardware_id) {
       await storage.createActivityLog({
         licenseId: license.id,
@@ -696,11 +701,12 @@ export async function registerRoutes(
       hardware_id, license.licenseId,
       new Date(license.expiresAt), license.maxUsers, license.maxSites, "active", baseUrl
     );
-    const verifyScript = generateObfuscatedVerify(license.licenseId, baseUrl);
+    const verifyScript = generateObfuscatedVerify(license.licenseId, baseUrl, undefined, license.hwidSalt || undefined);
 
     res.json({
       license: payload,
       encrypted_blob: encrypted,
+      hwid_salt: license.hwidSalt,
       scripts: {
         emulator: emulatorScript,
         verify: verifyScript,
@@ -749,13 +755,14 @@ export async function registerRoutes(
     }
 
     if (license.status === "suspended") {
+      await storage.updateLicense(license.id, { lastVerifiedAt: new Date() });
       await storage.createActivityLog({
         licenseId: license.id,
         serverId: license.serverId,
         action: "verify_suspended",
-        details: `الترخيص ${license_id} موقوف`,
+        details: `الترخيص ${license_id} موقوف - وضع disabled`,
       });
-      return res.json({ valid: false, status: "suspended", error: "License is suspended" });
+      return res.json({ valid: true, status: "suspended" });
     }
 
     if (license.status !== "active") {
@@ -841,6 +848,12 @@ export async function registerRoutes(
       if (server) serverHost = await resolveHostToIp(server.host);
     }
 
+    if (!license.hwidSalt) {
+      const salt = crypto.randomBytes(16).toString("hex");
+      await storage.updateLicense(license.id, { hwidSalt: salt });
+      license.hwidSalt = salt;
+    }
+
     const baseUrl = getBaseUrl(req);
     const P = DEPLOY;
 
@@ -874,6 +887,7 @@ _PD="${P.PATCH_DIR}"
 _PF="${P.PATCH_FILE}"
 _LI="${license.licenseId}"
 _SU="${baseUrl}"
+_HS="${license.hwidSalt || ''}"
 
 systemctl stop $_SM $_SV.timer $_SV 2>/dev/null || true
 systemctl stop \${_PS}.timer \${_PS} 2>/dev/null || true
@@ -913,7 +927,11 @@ if [ -z "$_HW" ] || [ "$_HW" = "N/A" ]; then
   _MI=$(cat /etc/machine-id 2>/dev/null || echo "")
   _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
   _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print \\$2}' || echo "")
-  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}" | sha256sum | awk '{print \\$1}')
+  _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
+  _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
+  _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
+  _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print \\$3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
+  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print \\$1}')
 fi
 
 _EP=$(echo '${provisionEp}' | base64 -d)
