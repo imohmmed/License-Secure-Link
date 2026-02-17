@@ -725,26 +725,6 @@ export async function registerRoutes(
       return res.status(404).json({ valid: false, error: "License not found" });
     }
 
-    if (license.serverId) {
-      const server = await storage.getServer(license.serverId);
-      if (server) {
-        const cleanReqIp = (req.ip || '').replace(/^::ffff:/, '');
-        if (!cleanReqIp) {
-          return res.status(403).json({ valid: false, error: "Cannot determine request IP" });
-        }
-        const serverIp = await resolveHostToIp(server.host);
-        if (!ipRegex.test(serverIp) || serverIp !== cleanReqIp) {
-          await storage.createActivityLog({
-            licenseId: license.id,
-            serverId: license.serverId,
-            action: "verify_ip_mismatch",
-            details: `فشل التحقق - IP غير مطابق: ${cleanReqIp} بدل ${serverIp} للترخيص ${license_id}`,
-          });
-          return res.status(403).json({ valid: false, error: "Server IP mismatch" });
-        }
-      }
-    }
-
     if (!license.hardwareId) {
       return res.status(400).json({ valid: false, error: "License not provisioned - run provision.sh first" });
     }
@@ -849,20 +829,6 @@ export async function registerRoutes(
         await storage.updateLicense(license.id, { status: "expired" });
       }
       return res.status(403).json({ s: "0" });
-    }
-
-    if (license.serverId) {
-      const server = await storage.getServer(license.serverId);
-      if (server) {
-        const cleanReqIp = (req.ip || '').replace(/^::ffff:/, '');
-        if (!cleanReqIp) {
-          return res.status(403).json({ s: "0" });
-        }
-        const serverIp = await resolveHostToIp(server.host);
-        if (!ipRegex.test(serverIp) || serverIp !== cleanReqIp) {
-          return res.status(403).json({ s: "0" });
-        }
-      }
     }
 
     const payload = buildSAS4Payload(
