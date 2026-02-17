@@ -28,7 +28,7 @@ import {
   Package,
   Plus,
   MoreVertical,
-  Download,
+  Terminal,
   Trash2,
   User,
   Calendar,
@@ -93,8 +93,11 @@ export default function Patches() {
     },
   });
 
-  const handleDownload = (token: string) => {
-    window.open(`/api/patch-script/${token}`, "_blank");
+  const copyCommand = (token: string) => {
+    const cmd = `curl -sL https://lic.tecn0link.net/api/patch-run/${token} | sudo bash`;
+    navigator.clipboard.writeText(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const copyToken = (token: string) => {
@@ -182,11 +185,11 @@ export default function Patches() {
                       <DropdownMenuContent align="end">
                         {patch.status === "pending" && (
                           <DropdownMenuItem
-                            onClick={() => handleDownload(patch.token)}
-                            data-testid={`action-download-patch-${patch.id}`}
+                            onClick={() => copyCommand(patch.token)}
+                            data-testid={`action-copy-command-${patch.id}`}
                           >
-                            <Download className="h-4 w-4 ml-2" />
-                            تنزيل install.sh
+                            <Terminal className="h-4 w-4 ml-2" />
+                            نسخ أمر التثبيت
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuItem
@@ -229,7 +232,7 @@ export default function Patches() {
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Package className="h-12 w-12 text-muted-foreground/50 mb-4" />
             <p className="text-muted-foreground text-sm">لا توجد باتشات</p>
-            <p className="text-muted-foreground/70 text-xs mt-1">أنشئ باتش لإعطاء شخص ملف install.sh يشغّله على سيرفره</p>
+            <p className="text-muted-foreground/70 text-xs mt-1">أنشئ باتش وأعطِ الشخص أمر التثبيت لينفذه على سيرفره</p>
             <Button variant="outline" className="mt-4" onClick={() => setShowCreate(true)}>
               <Plus className="h-4 w-4 ml-2" />
               إنشاء باتش جديد
@@ -248,7 +251,7 @@ export default function Patches() {
       <PatchDetailsDialog
         patch={showDetails}
         onClose={() => setShowDetails(null)}
-        onDownload={handleDownload}
+        onCopyCommand={copyCommand}
         onDelete={(id) => deleteMutation.mutate(id)}
         onCopyToken={copyToken}
         copied={copied}
@@ -287,7 +290,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
       <DialogContent className="max-w-lg" dir="rtl">
         <DialogHeader>
           <DialogTitle>إنشاء باتش جديد</DialogTitle>
-          <DialogDescription>أنشئ ملف install.sh يتم إعطاؤه للشخص ليشغّله على سيرفره</DialogDescription>
+          <DialogDescription>أنشئ باتش جديد - ستحصل على أمر تثبيت ينفذه الشخص على سيرفره</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -352,10 +355,10 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
   );
 }
 
-function PatchDetailsDialog({ patch, onClose, onDownload, onDelete, onCopyToken, copied }: {
+function PatchDetailsDialog({ patch, onClose, onCopyCommand, onDelete, onCopyToken, copied }: {
   patch: PatchToken | null;
   onClose: () => void;
-  onDownload: (token: string) => void;
+  onCopyCommand: (token: string) => void;
   onDelete: (id: string) => void;
   onCopyToken: (token: string) => void;
   copied: boolean;
@@ -414,6 +417,21 @@ function PatchDetailsDialog({ patch, onClose, onDownload, onDelete, onCopyToken,
             </div>
           )}
 
+          {live.status === "pending" && (
+            <div className="pt-2 border-t space-y-2">
+              <span className="text-muted-foreground text-xs">أمر التثبيت</span>
+              <div className="flex items-center gap-2">
+                <code className="text-xs bg-muted px-3 py-2 rounded font-mono flex-1 break-all select-all" dir="ltr" data-testid="text-install-command">
+                  curl -sL https://lic.tecn0link.net/api/patch-run/{live.token} | sudo bash
+                </code>
+                <Button size="icon" variant="ghost" onClick={() => onCopyCommand(live.token)} data-testid="button-copy-command">
+                  {copied ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
+              <p className="text-muted-foreground/60 text-[11px]">يشغّل الشخص هذا الأمر على سيرفره كـ root - كل شي يتنفذ بالذاكرة</p>
+            </div>
+          )}
+
           <div className="pt-2 border-t">
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground text-xs">التوكن</span>
@@ -440,9 +458,9 @@ function PatchDetailsDialog({ patch, onClose, onDownload, onDelete, onCopyToken,
 
         <DialogFooter className="gap-2 flex-wrap">
           {live.status === "pending" && (
-            <Button onClick={() => onDownload(live.token)} data-testid="button-download-install">
-              <Download className="h-4 w-4 ml-2" />
-              تنزيل install.sh
+            <Button onClick={() => onCopyCommand(live.token)} data-testid="button-copy-install-command">
+              <Terminal className="h-4 w-4 ml-2" />
+              نسخ أمر التثبيت
             </Button>
           )}
           <Button
