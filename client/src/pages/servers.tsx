@@ -33,14 +33,10 @@ import {
   Trash2,
   Edit,
   Terminal,
-  Globe,
   Hash,
   User,
-  MonitorSmartphone,
-  MapPin,
-  Cpu,
 } from "lucide-react";
-import type { Server as ServerType, PatchToken } from "@shared/schema";
+import type { Server as ServerType } from "@shared/schema";
 
 export default function Servers() {
   const { toast } = useToast();
@@ -49,10 +45,6 @@ export default function Servers() {
 
   const { data: servers, isLoading } = useQuery<ServerType[]>({
     queryKey: ["/api/servers"],
-  });
-
-  const { data: patchServers, isLoading: patchLoading } = useQuery<PatchToken[]>({
-    queryKey: ["/api/patches/available"],
   });
 
   const createMutation = useMutation({
@@ -260,83 +252,6 @@ export default function Servers() {
           </CardContent>
         </Card>
       )}
-
-      <div className="pt-4 border-t space-y-4">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight" data-testid="text-patch-servers-title">سيرفرات باتشات</h2>
-          <p className="text-muted-foreground text-sm mt-1">العملاء المسجلين عبر الباتشات بانتظار إنشاء ترخيص</p>
-        </div>
-
-        {patchLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {[1, 2].map((i) => (
-              <Skeleton key={i} className="h-36" />
-            ))}
-          </div>
-        ) : patchServers && patchServers.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {patchServers.map((patch) => (
-              <Card
-                key={patch.id}
-                className="hover-elevate transition-all border-dashed"
-                data-testid={`card-patch-server-${patch.id}`}
-              >
-                <CardContent className="p-4 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-10 h-10 rounded-md bg-amber-500/10 flex-shrink-0">
-                      <MonitorSmartphone className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-sm">{patch.personName}</h3>
-                      <p className="text-xs text-muted-foreground">باتش مسجل</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2 text-xs">
-                      <span className="flex items-center gap-1.5 text-muted-foreground">
-                        <Globe className="h-3 w-3" /> IP
-                      </span>
-                      <span className="font-mono" data-testid={`text-patch-ip-${patch.id}`}>{patch.activatedIp || "—"}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 text-xs">
-                      <span className="flex items-center gap-1.5 text-muted-foreground">
-                        <MapPin className="h-3 w-3" /> Hostname
-                      </span>
-                      <span className="font-mono" data-testid={`text-patch-hostname-${patch.id}`}>{patch.activatedHostname || "—"}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 text-xs">
-                      <span className="flex items-center gap-1.5 text-muted-foreground">
-                        <Cpu className="h-3 w-3" /> HWID
-                      </span>
-                      <span className="font-mono text-xs truncate max-w-[140px]" data-testid={`text-patch-hwid-${patch.id}`}>
-                        {patch.hardwareId ? patch.hardwareId.substring(0, 16) + "..." : "—"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t">
-                    <Badge
-                      variant="outline"
-                      className="bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate"
-                      data-testid={`status-patch-${patch.id}`}
-                    >
-                      بانتظار الترخيص
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <MonitorSmartphone className="h-10 w-10 text-muted-foreground/50 mb-3" />
-              <p className="text-muted-foreground text-sm">لا توجد سيرفرات باتشات مسجلة</p>
-            </CardContent>
-          </Card>
-        )}
-      </div>
 
       <ServerFormDialog
         open={showCreate || !!editServer}
