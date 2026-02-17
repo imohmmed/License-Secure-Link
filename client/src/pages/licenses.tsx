@@ -49,6 +49,7 @@ import {
   CheckCircle,
   Edit,
   Clock,
+  Download,
 } from "lucide-react";
 import type { License, Server as ServerType } from "@shared/schema";
 
@@ -342,6 +343,16 @@ export default function Licenses() {
                             نشر على السيرفر
                           </DropdownMenuItem>
                         )}
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => {
+                            window.open(`/api/install-script/${license.licenseId}`, "_blank");
+                          }}
+                          data-testid={`action-install-${license.id}`}
+                        >
+                          <Download className="h-4 w-4 ml-2" />
+                          تنزيل install.sh
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
