@@ -496,7 +496,7 @@ export async function registerRoutes(
         details: `تم نشر الترخيص ${license.licenseId} على السيرفر ${server.name}`,
       });
 
-      res.json({ success: true, message: "تم النشر والتفعيل بنجاح" });
+      res.json({ success: true, message: "تم النشر والتفعيل بنجاح", output: result.output, error: result.error });
     } else {
       res.status(500).json({ message: result.error || "فشل النشر" });
     }
