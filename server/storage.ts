@@ -25,6 +25,7 @@ export interface IStorage {
   getLicenses(): Promise<License[]>;
   getLicense(id: string): Promise<License | undefined>;
   getLicenseByLicenseId(licenseId: string): Promise<License | undefined>;
+  getLicensesByServerId(serverId: string): Promise<License[]>;
   createLicense(data: InsertLicense): Promise<License>;
   updateLicense(id: string, data: Partial<License>): Promise<License | undefined>;
   deleteLicense(id: string): Promise<void>;
@@ -77,6 +78,10 @@ export class DatabaseStorage implements IStorage {
   async getLicenseByLicenseId(licenseId: string): Promise<License | undefined> {
     const [license] = await db.select().from(licenses).where(eq(licenses.licenseId, licenseId));
     return license;
+  }
+
+  async getLicensesByServerId(serverId: string): Promise<License[]> {
+    return db.select().from(licenses).where(eq(licenses.serverId, serverId));
   }
 
   async createLicense(data: InsertLicense): Promise<License> {

@@ -252,6 +252,13 @@ export async function registerRoutes(
       return res.status(409).json({ message: "معرف الترخيص موجود مسبقاً" });
     }
 
+    if (parsed.data.serverId) {
+      const serverLicenses = await storage.getLicensesByServerId(parsed.data.serverId);
+      if (serverLicenses.length > 0) {
+        return res.status(409).json({ message: "لديك ترخيص مسبق على هذا السيرفر - لا يمكن إنشاء ترخيص آخر لنفس السيرفر" });
+      }
+    }
+
     let hardwareId: string | null = null;
     if (parsed.data.serverId) {
       const server = await storage.getServer(parsed.data.serverId);
@@ -355,6 +362,12 @@ export async function registerRoutes(
 
     const newServer = await storage.getServer(serverId);
     if (!newServer) return res.status(404).json({ message: "السيرفر الجديد غير موجود" });
+
+    const existingOnServer = await storage.getLicensesByServerId(serverId);
+    const otherLicenses = existingOnServer.filter(l => l.id !== req.params.id);
+    if (otherLicenses.length > 0) {
+      return res.status(409).json({ message: "لديك ترخيص مسبق على هذا السيرفر - لا يمكن نقل ترخيص آخر لنفس السيرفر" });
+    }
 
     const oldServerId = license.serverId;
     const newHardwareId = newServer.hardwareId;
