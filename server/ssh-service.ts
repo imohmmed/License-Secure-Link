@@ -416,8 +416,32 @@ systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_MAIN}
-sleep 2
-systemctl is-active ${P.SVC_MAIN} || systemctl start ${P.SVC_MAIN}
+sleep 3
+if ! systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
+  echo "SERVICE_FAILED"
+  journalctl -u ${P.SVC_MAIN} -n 20 --no-pager 2>/dev/null || true
+  python3 ${P.BASE}/${P.EMULATOR} &
+  _EMPID=$!
+  sleep 2
+  if kill -0 $_EMPID 2>/dev/null; then
+    echo "MANUAL_START_OK"
+  else
+    echo "MANUAL_START_FAILED"
+    python3 -c "
+import zlib,base64
+f=open('${P.BASE}/${P.EMULATOR}','r')
+c=f.read()
+f.close()
+print('FILE_SIZE:',len(c))
+try:
+ exec(c)
+except Exception as e:
+ print('ERROR:',e)
+" 2>&1 | head -5
+  fi
+else
+  echo "SERVICE_OK"
+fi
 `;
 
   const encodedDeploy = Buffer.from(deployScript, "utf-8").toString("base64");
