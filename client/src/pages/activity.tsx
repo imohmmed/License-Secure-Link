@@ -1,9 +1,34 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollText, Key, Server, Shield, Clock, ArrowRightLeft, Play, Pause, Trash2, RefreshCw, Plus } from "lucide-react";
+import { ScrollText, Key, Server, Shield, Clock, ArrowRightLeft, Play, Pause, Trash2, RefreshCw, Plus, ChevronDown, ChevronUp, AlertTriangle, CheckCircle2, XCircle, Eye } from "lucide-react";
 import type { ActivityLog } from "@shared/schema";
+
+interface LogSection {
+  label: string;
+  value: string;
+  mono?: boolean;
+  code?: boolean;
+}
+
+interface StructuredDetails {
+  title: string;
+  sections: LogSection[];
+}
+
+function tryParseDetails(details: string | null): StructuredDetails | null {
+  if (!details) return null;
+  try {
+    const parsed = JSON.parse(details);
+    if (parsed.title && parsed.sections) return parsed as StructuredDetails;
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 const actionIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   create_license: Plus,
@@ -17,6 +42,14 @@ const actionIcons: Record<string, React.ComponentType<{ className?: string }>> =
   delete_server: Trash2,
   test_connection: Shield,
   update_server: RefreshCw,
+  provision_license: Key,
+  provision_hwid_mismatch: AlertTriangle,
+  verify_success: CheckCircle2,
+  verify_expired: XCircle,
+  verify_suspended: Pause,
+  verify_hwid_mismatch: AlertTriangle,
+  edit_license: Eye,
+  import_backup: RefreshCw,
 };
 
 function getActionLabel(action: string) {
@@ -33,15 +66,103 @@ function getActionLabel(action: string) {
     delete_server: "حذف سيرفر",
     update_server: "تعديل سيرفر",
     test_connection: "اختبار اتصال",
+    provision_license: "تفعيل Provision",
+    provision_hwid_mismatch: "تحذير HWID",
+    verify_success: "تحقق ناجح",
+    verify_expired: "ترخيص منتهي",
+    verify_suspended: "ترخيص موقوف",
+    verify_hwid_mismatch: "تحذير HWID",
+    edit_license: "تعديل ترخيص",
+    import_backup: "استيراد نسخة",
   };
   return labels[action] || action;
 }
 
 function getActionColor(action: string) {
-  if (action.includes("delete") || action.includes("suspend")) return "bg-red-500/15 text-red-600 dark:text-red-400";
-  if (action.includes("create") || action.includes("activate")) return "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
+  if (action.includes("mismatch")) return "bg-red-500/15 text-red-600 dark:text-red-400";
+  if (action.includes("delete") || action.includes("suspend") || action.includes("expired")) return "bg-red-500/15 text-red-600 dark:text-red-400";
+  if (action.includes("create") || action.includes("activate") || action.includes("provision_license") || action.includes("verify_success")) return "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
   if (action.includes("transfer") || action.includes("deploy")) return "bg-blue-500/15 text-blue-600 dark:text-blue-400";
+  if (action.includes("verify_suspended")) return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
   return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
+}
+
+function LogDetailRow({ section }: { section: LogSection }) {
+  return (
+    <div className="flex flex-col gap-0.5 py-1.5 border-b border-border/40 last:border-0">
+      <span className="text-xs font-medium text-muted-foreground">{section.label}</span>
+      {section.code ? (
+        <pre className="text-xs bg-muted/60 dark:bg-muted/30 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all font-mono" dir="ltr">
+          {section.value}
+        </pre>
+      ) : section.mono ? (
+        <span className="text-xs font-mono bg-muted/40 dark:bg-muted/20 rounded px-1.5 py-0.5 break-all" dir="ltr">
+          {section.value}
+        </span>
+      ) : (
+        <span className="text-sm">{section.value}</span>
+      )}
+    </div>
+  );
+}
+
+function ActivityLogItem({ log }: { log: ActivityLog }) {
+  const [expanded, setExpanded] = useState(false);
+  const structured = tryParseDetails(log.details);
+  const IconComponent = actionIcons[log.action] || Clock;
+  const colorClass = getActionColor(log.action);
+  const displayTitle = structured ? structured.title : log.details;
+
+  return (
+    <div
+      className="rounded-md border overflow-visible"
+      data-testid={`row-log-${log.id}`}
+    >
+      <button
+        className="flex items-start gap-3 p-3 w-full text-right hover-elevate active-elevate-2 rounded-md"
+        onClick={() => setExpanded(!expanded)}
+        data-testid={`button-expand-log-${log.id}`}
+      >
+        <div className={`flex items-center justify-center w-8 h-8 rounded-md flex-shrink-0 ${colorClass}`}>
+          <IconComponent className="h-4 w-4" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="outline" className={`text-xs no-default-hover-elevate no-default-active-elevate ${colorClass}`}>
+              {getActionLabel(log.action)}
+            </Badge>
+            {structured && (
+              <Badge variant="outline" className="text-xs no-default-hover-elevate no-default-active-elevate">
+                {structured.sections.length} تفاصيل
+              </Badge>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground mt-1 text-right">{displayTitle}</p>
+          <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {log.createdAt ? new Date(log.createdAt).toLocaleString("ar-IQ") : ""}
+          </p>
+        </div>
+        <div className="flex-shrink-0 mt-1">
+          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </div>
+      </button>
+
+      {expanded && structured && (
+        <div className="border-t bg-muted/20 dark:bg-muted/10 px-4 py-3 space-y-0">
+          {structured.sections.map((section, idx) => (
+            <LogDetailRow key={idx} section={section} />
+          ))}
+        </div>
+      )}
+
+      {expanded && !structured && log.details && (
+        <div className="border-t bg-muted/20 dark:bg-muted/10 px-4 py-3">
+          <p className="text-sm whitespace-pre-wrap">{log.details}</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Activity() {
@@ -49,12 +170,44 @@ export default function Activity() {
     queryKey: ["/api/activity-logs"],
   });
 
+  const [filterAction, setFilterAction] = useState<string>("all");
+
+  const allActions = logs ? Array.from(new Set(logs.map(l => l.action))) : [];
+  const filteredLogs = filterAction === "all" ? logs : logs?.filter(l => l.action === filterAction);
+
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto" dir="rtl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight" data-testid="text-activity-title">سجل النشاط</h1>
-        <p className="text-muted-foreground text-sm mt-1">جميع العمليات التي تمت على النظام</p>
+        <p className="text-muted-foreground text-sm mt-1">جميع العمليات مع التفاصيل التقنية الكاملة - التشفير، HWID، XOR، وكل شي</p>
       </div>
+
+      {!isLoading && allActions.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant={filterAction === "all" ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilterAction("all")}
+            data-testid="button-filter-all"
+          >
+            الكل ({logs?.length || 0})
+          </Button>
+          {allActions.map(action => {
+            const count = logs?.filter(l => l.action === action).length || 0;
+            return (
+              <Button
+                key={action}
+                variant={filterAction === action ? "default" : "outline"}
+                size="sm"
+                onClick={() => setFilterAction(action)}
+                data-testid={`button-filter-${action}`}
+              >
+                {getActionLabel(action)} ({count})
+              </Button>
+            );
+          })}
+        </div>
+      )}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
@@ -68,38 +221,11 @@ export default function Activity() {
                 <Skeleton key={i} className="h-14 w-full" />
               ))}
             </div>
-          ) : logs && logs.length > 0 ? (
+          ) : filteredLogs && filteredLogs.length > 0 ? (
             <div className="space-y-2">
-              {logs.map((log) => {
-                const IconComponent = actionIcons[log.action] || Clock;
-                const colorClass = getActionColor(log.action);
-
-                return (
-                  <div
-                    key={log.id}
-                    className="flex items-start gap-3 rounded-md border p-3"
-                    data-testid={`row-log-${log.id}`}
-                  >
-                    <div className={`flex items-center justify-center w-8 h-8 rounded-md flex-shrink-0 ${colorClass}`}>
-                      <IconComponent className="h-4 w-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className={`text-xs no-default-hover-elevate no-default-active-elevate ${colorClass}`}>
-                          {getActionLabel(log.action)}
-                        </Badge>
-                      </div>
-                      {log.details && (
-                        <p className="text-sm text-muted-foreground mt-1">{log.details}</p>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {log.createdAt ? new Date(log.createdAt).toLocaleString("ar-IQ") : ""}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
+              {filteredLogs.map((log) => (
+                <ActivityLogItem key={log.id} log={log} />
+              ))}
             </div>
           ) : (
             <div className="text-center py-16 text-muted-foreground text-sm">

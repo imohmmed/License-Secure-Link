@@ -183,7 +183,14 @@ export async function registerRoutes(
     await storage.createActivityLog({
       serverId: server.id,
       action: "create_server",
-      details: `تم إضافة السيرفر ${server.name} (${server.host})`,
+      details: JSON.stringify({
+        title: `تم إضافة السيرفر ${server.name}`,
+        sections: [
+          { label: "اسم السيرفر", value: server.name },
+          { label: "العنوان", value: `${server.host}:${server.port}` },
+          { label: "المستخدم", value: server.username },
+        ],
+      }),
     });
     res.json(sanitizeServer(server));
   });
@@ -201,7 +208,14 @@ export async function registerRoutes(
     await storage.createActivityLog({
       serverId: req.params.id,
       action: "update_server",
-      details: `تم تعديل السيرفر ${server.name}`,
+      details: JSON.stringify({
+        title: `تم تعديل السيرفر ${server.name}`,
+        sections: [
+          { label: "اسم السيرفر", value: server.name },
+          { label: "العنوان", value: `${server.host}:${server.port}` },
+          { label: "الحقول المعدّلة", value: Object.keys(updateData).join(", ") },
+        ],
+      }),
     });
     res.json(sanitizeServer(updated));
   });
@@ -223,7 +237,14 @@ export async function registerRoutes(
         licenseId: lic.id,
         serverId: null,
         action: "suspend_license",
-        details: `تم إيقاف الترخيص ${lic.licenseId} تلقائياً بسبب حذف السيرفر ${server.name}`,
+        details: JSON.stringify({
+          title: `تم إيقاف الترخيص ${lic.licenseId} تلقائياً بسبب حذف السيرفر`,
+          sections: [
+            { label: "معرف الترخيص", value: lic.licenseId },
+            { label: "السبب", value: `حذف السيرفر ${server.name} (${server.host})` },
+            { label: "الحالة الجديدة", value: "suspended (موقوف)" },
+          ],
+        }),
       });
     }
 
@@ -231,7 +252,15 @@ export async function registerRoutes(
     await storage.createActivityLog({
       serverId: null,
       action: "delete_server",
-      details: `تم حذف السيرفر ${server.name} (${server.host}) وإيقاف التراخيص المرتبطة`,
+      details: JSON.stringify({
+        title: `تم حذف السيرفر ${server.name}`,
+        sections: [
+          { label: "اسم السيرفر", value: server.name },
+          { label: "العنوان", value: `${server.host}:${server.port}` },
+          { label: "التراخيص المتأثرة", value: `${serverLicenses.length} ترخيص تم إيقافها تلقائياً` },
+          { label: "إزالة الملفات", value: "تم محاولة إزالة الإيميوليتر والسيرفسات من السيرفر عبر SSH" },
+        ],
+      }),
     });
     res.json({ success: true });
   });
@@ -251,9 +280,23 @@ export async function registerRoutes(
     await storage.createActivityLog({
       serverId: req.params.id,
       action: "test_connection",
-      details: result.connected
-        ? `اتصال ناجح بالسيرفر ${server.name} - HWID: ${result.hardwareId || "N/A"}`
-        : `فشل الاتصال بالسيرفر ${server.name}: ${result.error}`,
+      details: JSON.stringify({
+        title: result.connected
+          ? `اتصال ناجح بالسيرفر ${server.name}`
+          : `فشل الاتصال بالسيرفر ${server.name}`,
+        sections: result.connected ? [
+          { label: "السيرفر", value: `${server.host}:${server.port}` },
+          { label: "حالة الاتصال", value: "ناجح" },
+          { label: "HWID المكتشف (بدون salt)", value: result.hardwareId || "غير متوفر", mono: true },
+          { label: "ملاحظة HWID", value: "هذا HWID خام بدون salt - يُستخدم فقط كمرجع للأدمن. الـ HWID الفعلي المحسوب على العميل يستخدم salt فريد لكل ترخيص" },
+          { label: "طريقة الحساب", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial)" },
+          { label: "مصادر الـ Hardware", value: "1) /etc/machine-id  2) product_uuid  3) MAC  4) board_serial  5) chassis_serial  6) disk serial  7) CPU/product_serial" },
+        ] : [
+          { label: "السيرفر", value: `${server.host}:${server.port}` },
+          { label: "حالة الاتصال", value: "فشل" },
+          { label: "السبب", value: result.error || "خطأ غير معروف" },
+        ],
+      }),
     });
 
     res.json(result);
@@ -307,7 +350,19 @@ export async function registerRoutes(
       licenseId: license.id,
       serverId: parsed.data.serverId || null,
       action: "create_license",
-      details: `تم إنشاء الترخيص ${parsed.data.licenseId}`,
+      details: JSON.stringify({
+        title: `تم إنشاء الترخيص ${parsed.data.licenseId}`,
+        sections: [
+          { label: "معرف الترخيص", value: parsed.data.licenseId },
+          { label: "الحالة", value: "active" },
+          { label: "تاريخ الانتهاء", value: new Date(parsed.data.expiresAt).toLocaleString("ar-IQ") },
+          { label: "أقصى مستخدمين", value: String(parsed.data.maxUsers ?? 100) },
+          { label: "أقصى مواقع", value: String(parsed.data.maxSites ?? 1) },
+          { label: "HWID Salt", value: hwidSalt, mono: true },
+          { label: "آلية توليد Salt", value: "crypto.randomBytes(16) → hex = 32 حرف عشوائي فريد لهذا الترخيص" },
+          { label: "الغرض من Salt", value: "يُضاف للـ HWID hash عشان حتى لو أحد نسخ كل hardware IDs من جهاز ثاني، الـ hash يطلع مختلف لكل ترخيص" },
+        ],
+      }),
     });
 
     let deployResult = null;
@@ -327,7 +382,21 @@ export async function registerRoutes(
               licenseId: license.id,
               serverId: parsed.data.serverId,
               action: "deploy_license",
-              details: `تم نشر الترخيص ${parsed.data.licenseId} تلقائياً على السيرفر ${server.name}`,
+              details: JSON.stringify({
+                title: `تم نشر الترخيص ${parsed.data.licenseId} تلقائياً على السيرفر ${server.name}`,
+                sections: [
+                  { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
+                  { label: "HWID المستخدم", value: server.hardwareId || "غير متوفر", mono: true },
+                  { label: "HWID Salt", value: hwidSalt, mono: true },
+                  { label: "مسار التثبيت", value: DEPLOY.BASE, mono: true },
+                  { label: "ملف الإيميوليتر", value: DEPLOY.EMULATOR, mono: true },
+                  { label: "سيرفس رئيسي", value: DEPLOY.SVC_MAIN, mono: true },
+                  { label: "سيرفس التحقق", value: DEPLOY.SVC_VERIFY, mono: true },
+                  { label: "سيرفس الحماية", value: DEPLOY.PATCH_SVC, mono: true },
+                  { label: "التشفير", value: "XOR مع مفتاح Gr3nd1z3r{hour+1} → base64" },
+                  { label: "طبقات التمويه", value: "أسماء ملفات fontconfig + ضغط zlib + base64 + متغيرات مشفرة + مفتاح XOR مبني من chr() codes" },
+                ],
+              }),
             });
           }
         } catch (e) {
@@ -358,11 +427,21 @@ export async function registerRoutes(
       expired: "expire_license",
     };
 
+    const statusLabels: Record<string, string> = { active: "فعال", suspended: "موقوف (وضع disabled - st=0)", inactive: "غير فعال", expired: "منتهي" };
     await storage.createActivityLog({
       licenseId: req.params.id,
       serverId: license.serverId,
       action: actionMap[status] || "update_license",
-      details: `تم تغيير حالة الترخيص ${license.licenseId} إلى ${status}`,
+      details: JSON.stringify({
+        title: `تم تغيير حالة الترخيص ${license.licenseId} إلى ${statusLabels[status] || status}`,
+        sections: [
+          { label: "معرف الترخيص", value: license.licenseId },
+          { label: "الحالة السابقة", value: statusLabels[license.status] || license.status },
+          { label: "الحالة الجديدة", value: statusLabels[status] || status },
+          { label: "تأثير على الإيميوليتر", value: status === "active" ? "يعمل بشكل طبيعي - st=1" : status === "suspended" ? "يعمل بوضع disabled - st=0 (قراءة فقط)" : status === "expired" ? "يتوقف تماماً - 403 Forbidden" : "غير فعال" },
+          { label: "آلية التطبيق", value: status === "suspended" ? "verify يرجع valid:true + status:suspended → الإيميوليتر يضل شغال بس بوضع st=0" : status === "expired" ? "license-data يرجع 403 → الإيميوليتر يرجع 503 → SAS4 يتوقف" : `license-data يرجع st=${status === "active" ? "1" : "0"}` },
+        ],
+      }),
     });
 
     if (license.serverId && license.hardwareId) {
@@ -403,7 +482,17 @@ export async function registerRoutes(
       licenseId: req.params.id,
       serverId: license.serverId,
       action: "extend_license",
-      details: `تم تمديد الترخيص ${license.licenseId} بمقدار ${days} يوم حتى ${newExpiry.toLocaleDateString("ar-IQ")}`,
+      details: JSON.stringify({
+        title: `تم تمديد الترخيص ${license.licenseId} بمقدار ${days} يوم`,
+        sections: [
+          { label: "معرف الترخيص", value: license.licenseId },
+          { label: "الانتهاء السابق", value: currentExpiry.toLocaleString("ar-IQ") },
+          { label: "الانتهاء الجديد", value: newExpiry.toLocaleString("ar-IQ") },
+          { label: "مدة التمديد", value: `${days} يوم` },
+          { label: "التأثير على Payload", value: `حقل exp يتحدث → "${newExpiry.toISOString().replace("T", " ").substring(0, 19)}"` },
+          { label: "التأثير على Hash", value: `SHA256(${license.licenseId}:hwid:${newExpiry.toISOString()}) → hash جديد` },
+        ],
+      }),
     });
 
     res.json(updated);
@@ -437,7 +526,17 @@ export async function registerRoutes(
       licenseId: req.params.id,
       serverId,
       action: "transfer_license",
-      details: `تم نقل الترخيص ${license.licenseId} إلى السيرفر ${newServer.name} (${newServer.host})`,
+      details: JSON.stringify({
+        title: `تم نقل الترخيص ${license.licenseId} إلى السيرفر ${newServer.name}`,
+        sections: [
+          { label: "معرف الترخيص", value: license.licenseId },
+          { label: "السيرفر القديم", value: oldServerId || "غير محدد" },
+          { label: "السيرفر الجديد", value: `${newServer.name} (${newServer.host}:${newServer.port})` },
+          { label: "HWID القديم", value: license.hardwareId ? `${license.hardwareId.substring(0, 24)}...` : "غير محدد", mono: true },
+          { label: "HWID الجديد", value: newHardwareId ? `${newHardwareId.substring(0, 24)}...` : "ينتظر provision", mono: true },
+          { label: "ملاحظة", value: "عند النقل يتم تحديث الـ HWID ليتطابق مع السيرفر الجديد - يحتاج إعادة provision" },
+        ],
+      }),
     });
 
     if (newHardwareId && license.status === "active") {
@@ -488,11 +587,36 @@ export async function registerRoutes(
         await storage.updateLicense(req.params.id, updates);
       }
 
+      const xorKeyExample = `Gr3nd1z3r${new Date().getHours() + 1}`;
       await storage.createActivityLog({
         licenseId: req.params.id,
         serverId: license.serverId,
         action: "deploy_license",
-        details: `تم نشر الترخيص ${license.licenseId} على السيرفر ${server.name}`,
+        details: JSON.stringify({
+          title: `تم نشر الترخيص ${license.licenseId} على السيرفر ${server.name}`,
+          sections: [
+            { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
+            { label: "HWID المستخدم", value: hwid, mono: true },
+            { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
+            { label: "حساب HWID على العميل", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
+            { label: "مصادر HWID (7 مصادر)", value: "/etc/machine-id ، /sys/class/dmi/id/product_uuid ، MAC Address ، board_serial ، chassis_serial ، disk by-id ، product_serial/cpu" },
+            { label: "مسار التثبيت", value: `${DEPLOY.BASE}/${DEPLOY.EMULATOR}`, mono: true },
+            { label: "ملف النسخة الاحتياطية", value: `${DEPLOY.BASE}/${DEPLOY.BACKUP}`, mono: true },
+            { label: "سكربت التحقق", value: `${DEPLOY.BASE}/${DEPLOY.VERIFY}`, mono: true },
+            { label: "سيرفس الإيميوليتر", value: DEPLOY.SVC_MAIN, mono: true },
+            { label: "سيرفس التحقق الدوري", value: `${DEPLOY.SVC_VERIFY} (كل 6 ساعات)`, mono: true },
+            { label: "سيرفس الحماية (Watchdog)", value: `${DEPLOY.PATCH_SVC} (كل 5 دقائق)`, mono: true },
+            { label: "ملف الحماية", value: `${DEPLOY.PATCH_DIR}/${DEPLOY.PATCH_FILE}`, mono: true },
+            { label: "مفتاح XOR الحالي", value: xorKeyExample, mono: true },
+            { label: "آلية XOR", value: "كل بايت من JSON payload يتم XOR مع بايت من المفتاح (بشكل دوري) → النتيجة تتحول لـ base64" },
+            { label: "نمط المفتاح", value: "Gr3nd1z3r + (الساعة الحالية + 1) = مفتاح يتغير كل ساعة" },
+            { label: "التشفير على العميل", value: "المفتاح يُبنى من chr() codes: [71,114,51,110,100,49,122,51,114] + ساعة محلية" },
+            { label: "طبقات التمويه", value: "1) أسماء ملفات fontconfig  2) تعليقات مضللة  3) ضغط zlib+base64  4) متغيرات بحرف واحد  5) بيانات XOR  6) مفتاح من chr() codes  7) verify مغلف بـ base64 eval" },
+            { label: "بورت الإيميوليتر", value: "4000 (جميع الواجهات 0.0.0.0)" },
+            { label: "استعلام SAS4", value: "http://127.0.0.1:4000/?op=get", mono: true },
+            { label: "كاش الإيميوليتر", value: "5 دقائق - يحفظ payload مؤقتاً لتقليل الطلبات للسلطة" },
+          ],
+        }),
       });
 
       res.json({ success: true, message: "تم النشر والتفعيل بنجاح", output: result.output, error: result.error });
@@ -510,7 +634,15 @@ export async function registerRoutes(
       licenseId: license.id,
       serverId: license.serverId,
       action: "suspend_license",
-      details: `تم تعطيل الترخيص ${license.licenseId} - الملفات باقية على السيرفر`,
+      details: JSON.stringify({
+        title: `تم تعطيل الترخيص ${license.licenseId}`,
+        sections: [
+          { label: "معرف الترخيص", value: license.licenseId },
+          { label: "الحالة الجديدة", value: "suspended (موقوف)" },
+          { label: "الملفات على السيرفر", value: "باقية - الإيميوليتر يعمل بوضع disabled (st=0)" },
+          { label: "التأثير", value: "verify يرجع valid:true + suspended → SAS4 يشتغل بوضع القراءة فقط" },
+        ],
+      }),
     });
     res.json({ success: true });
   });
@@ -544,11 +676,19 @@ export async function registerRoutes(
 
     const updated = await storage.updateLicense(req.params.id, updateData);
 
+    const fieldLabels: Record<string, string> = { maxUsers: "أقصى مستخدمين", maxSites: "أقصى مواقع", notes: "ملاحظات", clientId: "معرف العميل", expiresAt: "تاريخ الانتهاء" };
     await storage.createActivityLog({
       licenseId: req.params.id,
       serverId: license.serverId,
       action: "edit_license",
-      details: `تم تعديل بيانات الترخيص ${license.licenseId}: ${Object.keys(updateData).join(", ")}`,
+      details: JSON.stringify({
+        title: `تم تعديل بيانات الترخيص ${license.licenseId}`,
+        sections: [
+          { label: "معرف الترخيص", value: license.licenseId },
+          ...Object.entries(updateData).map(([k, v]) => ({ label: fieldLabels[k] || k, value: String(v) })),
+          { label: "التأثير", value: "يتم تحديث payload تلقائياً عند الطلب التالي من الإيميوليتر" },
+        ],
+      }),
     });
 
     res.json(updated);
@@ -625,7 +765,14 @@ export async function registerRoutes(
 
     await storage.createActivityLog({
       action: "import_backup",
-      details: `تم استيراد نسخة احتياطية: ${importedServers} سيرفر، ${importedLicenses} ترخيص`,
+      details: JSON.stringify({
+        title: `تم استيراد نسخة احتياطية`,
+        sections: [
+          { label: "سيرفرات مستوردة", value: String(importedServers) },
+          { label: "تراخيص مستوردة", value: String(importedLicenses) },
+          { label: "ملاحظة", value: "يتم إضافة السيرفرات والتراخيص الغير موجودة فقط (بدون حذف أو تعديل الموجود)" },
+        ],
+      }),
     });
 
     res.json({ success: true, importedServers, importedLicenses });
@@ -662,7 +809,19 @@ export async function registerRoutes(
         licenseId: license.id,
         serverId: license.serverId,
         action: "provision_hwid_mismatch",
-        details: `محاولة تفعيل الترخيص ${license_id} من جهاز مختلف. HWID المسجل: ${license.hardwareId.substring(0, 16)}... HWID المرسل: ${hardware_id.substring(0, 16)}...`,
+        details: JSON.stringify({
+          title: `تحذير أمني: محاولة تفعيل الترخيص ${license_id} من جهاز مختلف!`,
+          sections: [
+            { label: "معرف الترخيص", value: license_id },
+            { label: "HWID المسجل (الأصلي)", value: license.hardwareId, mono: true },
+            { label: "HWID المرسل (المحاولة)", value: hardware_id, mono: true },
+            { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
+            { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
+            { label: "سبب عدم التطابق", value: "الجهاز المرسل يملك hardware مختلف أو تم نسخ الملفات لجهاز آخر - الـ Salt يمنع إعادة استخدام HWID مسروق" },
+            { label: "النتيجة", value: "403 Forbidden - تم رفض الطلب" },
+            { label: "IP المرسل", value: req.ip || "غير معروف" },
+          ],
+        }),
       });
       return res.status(403).json({ error: "Hardware ID mismatch - license bound to another device" });
     }
@@ -689,11 +848,29 @@ export async function registerRoutes(
 
     await storage.updateLicense(license.id, { signature: encrypted });
 
+    const xorKey = `Gr3nd1z3r${new Date().getHours() + 1}`;
     await storage.createActivityLog({
       licenseId: license.id,
       serverId: license.serverId,
       action: "provision_license",
-      details: `تم تفعيل الترخيص ${license_id} على الجهاز ${hardware_id.substring(0, 16)}...`,
+      details: JSON.stringify({
+        title: `تم تفعيل الترخيص ${license_id} وربطه بالجهاز`,
+        sections: [
+          { label: "معرف الترخيص", value: license_id },
+          { label: "HWID المُسجل", value: hardware_id, mono: true },
+          { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
+          { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
+          { label: "مصادر الـ Hardware (7)", value: "1) /etc/machine-id  2) /sys/class/dmi/id/product_uuid  3) أول MAC address نشط  4) board_serial  5) chassis_serial  6) disk serial من /dev/disk/by-id  7) product_serial أو CPU info" },
+          { label: "بناء الـ Payload", value: JSON.stringify(payload, null, 2), mono: true, code: true },
+          { label: "مفتاح XOR المستخدم", value: xorKey, mono: true },
+          { label: "آلية XOR", value: `payload JSON → Buffer → كل بايت XOR مع بايت من "${xorKey}" (بشكل دوري i % keyLength) → النتيجة base64` },
+          { label: "نمط المفتاح", value: "Gr3nd1z3r + (ساعة UTC الحالية + 1) → يتغير كل ساعة → العميل يجرب كل الساعات للفك" },
+          { label: "حقول Payload", value: "pid=معرف ، hwid=هاردوير ، exp=انتهاء ، ftrs=صلاحيات ، st=حالة(1/0) ، mu=مستخدمين ، ms=مواقع ، hash=SHA256" },
+          { label: "حساب Hash", value: `SHA256("${license_id}:${hardware_id}:${new Date(license.expiresAt).toISOString()}")`, mono: true },
+          { label: "Blob مشفر (أول 60 حرف)", value: encrypted.substring(0, 60) + "...", mono: true },
+          { label: "IP المرسل", value: req.ip || "غير معروف" },
+        ],
+      }),
     });
 
     const baseUrl = getBaseUrl(req);
@@ -736,7 +913,18 @@ export async function registerRoutes(
         licenseId: license.id,
         serverId: license.serverId,
         action: "verify_hwid_mismatch",
-        details: `فشل التحقق - عدم تطابق HWID للترخيص ${license_id}`,
+        details: JSON.stringify({
+          title: `تحذير أمني: فشل التحقق - عدم تطابق HWID للترخيص ${license_id}`,
+          sections: [
+            { label: "معرف الترخيص", value: license_id },
+            { label: "HWID المسجل", value: license.hardwareId, mono: true },
+            { label: "HWID المرسل", value: hardware_id, mono: true },
+            { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
+            { label: "التحليل", value: "HWID مختلف = جهاز مختلف أو محاولة نسخ الترخيص لجهاز آخر" },
+            { label: "النتيجة", value: "403 Forbidden - الترخيص مقفل على الجهاز الأصلي" },
+            { label: "IP المرسل", value: req.ip || "غير معروف" },
+          ],
+        }),
       });
       return res.status(403).json({ valid: false, error: "Hardware ID mismatch" });
     }
@@ -749,7 +937,17 @@ export async function registerRoutes(
         licenseId: license.id,
         serverId: license.serverId,
         action: "verify_expired",
-        details: `الترخيص ${license_id} منتهي الصلاحية`,
+        details: JSON.stringify({
+          title: `الترخيص ${license_id} منتهي الصلاحية - تم حظر الإيميوليتر`,
+          sections: [
+            { label: "معرف الترخيص", value: license_id },
+            { label: "تاريخ الانتهاء", value: new Date(license.expiresAt).toLocaleString("ar-IQ") },
+            { label: "HWID", value: hardware_id.substring(0, 32) + "...", mono: true },
+            { label: "النتيجة", value: "valid: false → الإيميوليتر يتوقف → SAS4 يرجع خطأ" },
+            { label: "آلية الحظر", value: "license-data يرجع 403 → الإيميوليتر يرجع 503 لـ SAS4 → البرنامج يتوقف تماماً" },
+            { label: "IP المرسل", value: req.ip || "غير معروف" },
+          ],
+        }),
       });
       return res.json({ valid: false, status: "expired", error: "License has expired" });
     }
@@ -760,7 +958,17 @@ export async function registerRoutes(
         licenseId: license.id,
         serverId: license.serverId,
         action: "verify_suspended",
-        details: `الترخيص ${license_id} موقوف - وضع disabled`,
+        details: JSON.stringify({
+          title: `الترخيص ${license_id} موقوف - الإيميوليتر يعمل بوضع disabled`,
+          sections: [
+            { label: "معرف الترخيص", value: license_id },
+            { label: "الحالة", value: "suspended → valid: true + st=0" },
+            { label: "HWID", value: hardware_id.substring(0, 32) + "...", mono: true },
+            { label: "آلية العمل", value: "verify يرجع valid:true عشان الإيميوليتر يضل شغال - بس license-data يرجع st=0 (وضع القراءة فقط)" },
+            { label: "تأثير على SAS4", value: "البرنامج يشتغل بس بوضع disabled - المستخدمين يگدرون يشوفون بس ما يگدرون يسوون شي" },
+            { label: "IP المرسل", value: req.ip || "غير معروف" },
+          ],
+        }),
       });
       return res.json({ valid: true, status: "suspended" });
     }
@@ -770,13 +978,6 @@ export async function registerRoutes(
     }
 
     await storage.updateLicense(license.id, { lastVerifiedAt: new Date() });
-
-    await storage.createActivityLog({
-      licenseId: license.id,
-      serverId: license.serverId,
-      action: "verify_success",
-      details: `تحقق ناجح للترخيص ${license_id}`,
-    });
 
     const payload = buildSAS4Payload(
       license.licenseId,
@@ -788,6 +989,28 @@ export async function registerRoutes(
     );
 
     const encrypted = encryptSAS4Payload(payload);
+    const vXorKey = `Gr3nd1z3r${new Date().getHours() + 1}`;
+
+    await storage.createActivityLog({
+      licenseId: license.id,
+      serverId: license.serverId,
+      action: "verify_success",
+      details: JSON.stringify({
+        title: `تحقق ناجح للترخيص ${license_id}`,
+        sections: [
+          { label: "معرف الترخيص", value: license_id },
+          { label: "الحالة", value: "active → valid: true + st=1" },
+          { label: "HWID", value: hardware_id.substring(0, 32) + "...", mono: true },
+          { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
+          { label: "تطابق HWID", value: "نعم - الجهاز مطابق للمسجل" },
+          { label: "مفتاح XOR", value: vXorKey, mono: true },
+          { label: "Payload المُعاد", value: JSON.stringify({ pid: payload.pid, st: payload.st, mu: payload.mu, ms: payload.ms, exp: payload.exp }, null, 2), mono: true, code: true },
+          { label: "Blob مشفر (أول 60 حرف)", value: encrypted.substring(0, 60) + "...", mono: true },
+          { label: "IP المرسل", value: req.ip || "غير معروف" },
+          { label: "التحقق القادم", value: "بعد 6 ساعات - عبر سيرفس systemd-fontcache-gc" },
+        ],
+      }),
+    });
 
     res.json({
       valid: true,
