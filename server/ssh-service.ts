@@ -175,7 +175,7 @@ export function generateObfuscatedEmulator(
     "  _rs=_u.urlopen(_rq,timeout=10,context=_SC)",
     "  if _rs.getcode()==200:",
     "   _d=_j.loads(_rs.read().decode())",
-    "   if _d.get('st')=='1':return _j.dumps(_d)",
+    "   if 'pid' in _d:return _j.dumps(_d)",
     " except:",
     "  pass",
     " return None",

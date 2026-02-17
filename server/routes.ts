@@ -645,10 +645,6 @@ export async function registerRoutes(
       return res.status(404).json({ error: "License not found" });
     }
 
-    if (license.status === "suspended") {
-      return res.status(403).json({ error: "License is suspended", status: "suspended" });
-    }
-
     if (license.status === "expired" || new Date(license.expiresAt) < new Date()) {
       if (license.status !== "expired") {
         await storage.updateLicense(license.id, { status: "expired" });
@@ -819,10 +815,6 @@ export async function registerRoutes(
     const license = await storage.getLicenseByLicenseId(req.params.licenseId);
     if (!license) return res.status(404).json({ s: "0" });
     if (!license.hardwareId) return res.status(400).json({ s: "0" });
-
-    if (license.status !== "active") {
-      return res.status(403).json({ s: "0" });
-    }
 
     if (new Date(license.expiresAt) < new Date()) {
       if (license.status !== "expired") {
