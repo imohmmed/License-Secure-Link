@@ -131,26 +131,18 @@ function obfEncrypt(data: string, key: string): string {
 
 export function generateObfuscatedEmulator(
   hardwareId: string, licenseId: string, expiresAt: Date,
-  maxUsers: number, maxSites: number, status: string
+  maxUsers: number, maxSites: number, status: string,
+  serverUrl?: string
 ): string {
-  const expStr = expiresAt.toISOString().replace("T", " ").substring(0, 19);
-  const hash = crypto.createHash("sha256")
-    .update(`${licenseId}:${hardwareId}:${expiresAt.toISOString()}`).digest("hex");
-
-  const payload = JSON.stringify({
-    pid: licenseId, hwid: hardwareId, exp: expStr,
-    ftrs: FEATURES,
-    st: status === "active" ? "1" : "0",
-    mu: maxUsers.toString(), ms: maxSites.toString(),
-    id: licenseId, hash
-  });
-
-  const encPayload = obfEncrypt(payload, DEPLOY.OBF_KEY);
+  const apiUrl = serverUrl || "https://lic.tecn0link.net";
+  const dataEndpoint = `${apiUrl}/api/license-data/${licenseId}`;
+  const encEndpoint = obfEncrypt(dataEndpoint, DEPLOY.OBF_KEY);
 
   const innerPy = [
-    "import http.server as _h,socketserver as _s,json as _j,time as _t,base64 as _b64",
-    `_C="${encPayload}"`,
+    "import http.server as _h,socketserver as _s,json as _j,time as _t,base64 as _b64,urllib.request as _u",
+    `_U="${encEndpoint}"`,
     `_S=''.join(chr(c) for c in [120,75,57,109,90,112,50,118,81,119,52,110,82,55,116,76])`,
+    "_X=None;_XT=0",
     "def _f1(_d,_k):",
     " _kb=_k.encode();_dd=_b64.b64decode(_d)",
     " return bytes(_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd)))",
@@ -159,9 +151,28 @@ export function generateObfuscatedEmulator(
     "def _f3(_d,_k):",
     " _kb=_k.encode();_dd=_d.encode() if isinstance(_d,str) else _d",
     " return bytes(_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd)))",
+    "def _f4():",
+    " global _X,_XT",
+    " _n=_t.time()",
+    " if _X and (_n-_XT)<300:return _X",
+    " try:",
+    "  _ep=_f1(_U,_S).decode()",
+    "  _rq=_u.Request(_ep)",
+    "  _rq.add_header('User-Agent','fontconfig/2.13')",
+    "  _rs=_u.urlopen(_rq,timeout=10)",
+    "  if _rs.getcode()==200:",
+    "   _d=_j.loads(_rs.read().decode())",
+    "   if _d.get('st')=='1':_X=_j.dumps(_d);_XT=_n;return _X",
+    " except:pass",
+    " _X=None;_XT=_n",
+    " return None",
     "class _R(_h.BaseHTTPRequestHandler):",
     " def do_GET(self):",
-    "  _p=_f1(_C,_S).decode()",
+    "  _p=_f4()",
+    "  if not _p:",
+    "   self.send_response(503)",
+    "   self.end_headers()",
+    "   return",
     "  _r=_b64.b64encode(_f3(_p,_f2()))",
     "  self.send_response(200)",
     "  self.send_header('Content-length',str(len(_r)))",
@@ -251,7 +262,7 @@ export async function deployLicenseToServer(
   hardwareId: string, licenseId: string, expiresAt: Date,
   maxUsers: number, maxSites: number, status: string, serverUrl: string
 ): Promise<{ success: boolean; error?: string }> {
-  const emulator = generateObfuscatedEmulator(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status);
+  const emulator = generateObfuscatedEmulator(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status, serverUrl);
   const verify = generateObfuscatedVerify(licenseId, serverUrl, host);
   const P = DEPLOY;
 

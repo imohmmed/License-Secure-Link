@@ -635,7 +635,7 @@ export async function registerRoutes(
     const baseUrl = getBaseUrl(req);
     const emulatorScript = generateObfuscatedEmulator(
       hardware_id, license.licenseId,
-      new Date(license.expiresAt), license.maxUsers, license.maxSites, "active"
+      new Date(license.expiresAt), license.maxUsers, license.maxSites, "active", baseUrl
     );
     const verifyScript = generateObfuscatedVerify(license.licenseId, baseUrl);
 
@@ -748,6 +748,31 @@ export async function registerRoutes(
     );
     const encrypted = encryptSAS4Payload(payload);
     res.type("text/plain").send(encrypted);
+  });
+
+  // ─── License Data for Emulator (raw JSON, no XOR) - PUBLIC ──
+  app.use("/api/license-data", requireHttps);
+  app.get("/api/license-data/:licenseId", async (req, res) => {
+    const license = await storage.getLicenseByLicenseId(req.params.licenseId);
+    if (!license) return res.status(404).json({ s: "0" });
+    if (!license.hardwareId) return res.status(400).json({ s: "0" });
+
+    if (license.status !== "active") {
+      return res.status(403).json({ s: "0" });
+    }
+
+    if (new Date(license.expiresAt) < new Date()) {
+      if (license.status !== "expired") {
+        await storage.updateLicense(license.id, { status: "expired" });
+      }
+      return res.status(403).json({ s: "0" });
+    }
+
+    const payload = buildSAS4Payload(
+      license.licenseId, license.hardwareId,
+      new Date(license.expiresAt), license.maxUsers, license.maxSites, license.status
+    );
+    res.json(payload);
   });
 
   // ─── Install Script Download - ADMIN ───────────────────

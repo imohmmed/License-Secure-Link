@@ -112,7 +112,9 @@ shared/
 - XOR encryption with time-based key: `Gr3nd1z3r{hour+1}`
 - Payload format: {pid, hwid, exp, ftrs, st, mu, ms, id, hash}
 - Encrypted payload is base64 encoded
-- Emulator serves encrypted blob on port 4000 (localhost)
+- Emulator fetches raw payload from license authority (`/api/license-data/:licenseId`) on each request (5-min cache)
+- If authority returns error (suspended/expired/unreachable), emulator returns 503 → SAS4 stops working
+- Emulator does XOR encryption locally with local time, serves on port 4000 (all interfaces)
 - SAS4 software queries `http://127.0.0.1:4000/?op=get`
 - HWID captured from original sas_sspd binary or system fingerprint
 - Hash generated with SHA256 from license+hwid+expiry
