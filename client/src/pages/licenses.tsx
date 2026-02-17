@@ -630,10 +630,10 @@ function LicenseDetailsDialog({ license, onClose, servers, onEdit }: {
             <DetailRow
               label="معرف الهاردوير"
               value={
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs">{live.hardwareId || "غير محدد"}</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-mono text-xs break-all min-w-0">{live.hardwareId || "غير محدد"}</span>
                   {live.hardwareId && (
-                    <Button size="icon" variant="ghost" onClick={copyHwid}>
+                    <Button size="icon" variant="ghost" onClick={copyHwid} className="flex-shrink-0">
                       {copied ? <CheckCircle className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
                     </Button>
                   )}
@@ -687,9 +687,9 @@ function LicenseDetailsDialog({ license, onClose, servers, onEdit }: {
 
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{value}</span>
+    <div className="flex items-center justify-between gap-4 px-4 py-3 min-w-0">
+      <span className="text-sm text-muted-foreground whitespace-nowrap flex-shrink-0">{label}</span>
+      <span className="text-sm font-medium min-w-0 break-all text-left">{value}</span>
     </div>
   );
 }
