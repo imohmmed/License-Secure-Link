@@ -193,11 +193,22 @@ export async function registerRoutes(
       console.error("Failed to undeploy from server before deletion:", e);
     }
 
+    const serverLicenses = await storage.getLicensesByServerId(req.params.id);
+    for (const lic of serverLicenses) {
+      await storage.updateLicense(lic.id, { status: "suspended", serverId: null });
+      await storage.createActivityLog({
+        licenseId: lic.id,
+        serverId: null,
+        action: "suspend_license",
+        details: `تم إيقاف الترخيص ${lic.licenseId} تلقائياً بسبب حذف السيرفر ${server.name}`,
+      });
+    }
+
     await storage.deleteServer(req.params.id);
     await storage.createActivityLog({
       serverId: null,
       action: "delete_server",
-      details: `تم حذف السيرفر ${server.name} (${server.host}) وإيقاف الخدمات عليه`,
+      details: `تم حذف السيرفر ${server.name} (${server.host}) وإيقاف التراخيص المرتبطة`,
     });
     res.json({ success: true });
   });
