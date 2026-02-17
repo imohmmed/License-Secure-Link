@@ -31,12 +31,9 @@ import {
   Terminal,
   Trash2,
   User,
-  Calendar,
-  Users,
   Globe,
   Clock,
   CheckCircle,
-  XCircle,
   Copy,
   Key,
 } from "lucide-react";
@@ -150,26 +147,26 @@ export default function Patches() {
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
                         <span className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          {patch.durationDays} يوم
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Users className="h-3 w-3" />
-                          {patch.maxUsers.toLocaleString()} مستخدم
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Globe className="h-3 w-3" />
-                          {patch.maxSites} موقع
-                        </span>
-                        <span className="flex items-center gap-1">
                           <Clock className="h-3 w-3" />
                           {new Date(patch.createdAt).toLocaleDateString("ar-IQ")}
                         </span>
+                        {patch.status === "used" && patch.activatedHostname && (
+                          <span className="flex items-center gap-1">
+                            <Globe className="h-3 w-3" />
+                            {patch.activatedHostname}
+                          </span>
+                        )}
                         {patch.status === "used" && patch.usedAt && (
                           <span className="flex items-center gap-1">
                             <CheckCircle className="h-3 w-3 text-emerald-500" />
                             فُعّل {new Date(patch.usedAt).toLocaleDateString("ar-IQ")}
                           </span>
+                        )}
+                        {patch.status === "used" && !patch.licenseId && (
+                          <Badge variant="outline" className="bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate text-[10px]">بانتظار الترخيص</Badge>
+                        )}
+                        {patch.status === "used" && patch.licenseId && (
+                          <Badge variant="outline" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 no-default-hover-elevate no-default-active-elevate text-[10px]">مُرخّص</Badge>
                         )}
                       </div>
                     </div>
@@ -266,26 +263,15 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
   onSubmit: (data: any) => void;
   isPending: boolean;
 }) {
-  const defaultExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
   const [form, setForm] = useState({
     personName: "",
-    maxUsers: "1000",
-    maxSites: "1",
-    expiresAt: defaultExpiry,
     notes: "",
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const expiryDate = new Date(form.expiresAt);
-    const now = new Date();
-    const diffMs = expiryDate.getTime() - now.getTime();
-    const durationDays = Math.max(1, Math.ceil(diffMs / (24 * 60 * 60 * 1000)));
     onSubmit({
       personName: form.personName,
-      maxUsers: parseInt(form.maxUsers),
-      maxSites: parseInt(form.maxSites),
-      durationDays,
       notes: form.notes || null,
     });
   };
@@ -295,7 +281,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
       <DialogContent className="max-w-lg" dir="rtl">
         <DialogHeader>
           <DialogTitle>إنشاء باتش جديد</DialogTitle>
-          <DialogDescription>أنشئ باتش جديد - ستحصل على أمر تثبيت ينفذه الشخص على سيرفره</DialogDescription>
+          <DialogDescription>أضف اسم الشخص وأرسله أمر التثبيت — بعد التثبيت يظهر تلقائياً بقائمة العملاء المتاحين لإنشاء ترخيص</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -306,38 +292,6 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
               placeholder="مثال: أحمد - العراق"
               required
               data-testid="input-person-name"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>الحد الأقصى للمستخدمين</Label>
-              <Input
-                type="number"
-                value={form.maxUsers}
-                onChange={(e) => setForm({ ...form, maxUsers: e.target.value })}
-                required
-                data-testid="input-patch-max-users"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>الحد الأقصى للمواقع</Label>
-              <Input
-                type="number"
-                value={form.maxSites}
-                onChange={(e) => setForm({ ...form, maxSites: e.target.value })}
-                required
-                data-testid="input-patch-max-sites"
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>تاريخ انتهاء الترخيص</Label>
-            <Input
-              type="datetime-local"
-              value={form.expiresAt}
-              onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
-              required
-              data-testid="input-patch-expires-at"
             />
           </div>
           <div className="space-y-2">
@@ -394,21 +348,27 @@ function PatchDetailsDialog({ patch, onClose, onCopyCommand, onDelete, onCopyTok
             <PatchStatusBadge status={live.status} />
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-muted-foreground">مدة الترخيص</span>
-            <span>{live.durationDays} يوم</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-muted-foreground">أقصى مستخدمين</span>
-            <span>{live.maxUsers.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-muted-foreground">أقصى مواقع</span>
-            <span>{live.maxSites}</span>
-          </div>
-          <div className="flex justify-between items-center">
             <span className="text-muted-foreground">تاريخ الإنشاء</span>
             <span>{new Date(live.createdAt).toLocaleString("ar-IQ")}</span>
           </div>
+          {live.activatedHostname && (
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">اسم السيرفر</span>
+              <span>{live.activatedHostname}</span>
+            </div>
+          )}
+          {live.activatedIp && (
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">عنوان IP</span>
+              <span dir="ltr" className="font-mono text-xs">{live.activatedIp}</span>
+            </div>
+          )}
+          {live.status === "used" && !live.licenseId && (
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">الترخيص</span>
+              <Badge variant="outline" className="bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate">بانتظار إنشاء الترخيص</Badge>
+            </div>
+          )}
           {live.usedAt && (
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground">تاريخ التفعيل</span>

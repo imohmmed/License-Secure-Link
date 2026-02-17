@@ -51,7 +51,7 @@ import {
   Clock,
   Download,
 } from "lucide-react";
-import type { License, Server as ServerType } from "@shared/schema";
+import type { License, Server as ServerType, PatchToken } from "@shared/schema";
 
 function StatusBadge({ status }: { status: string }) {
   const variants: Record<string, { label: string; className: string }> = {
@@ -81,6 +81,10 @@ export default function Licenses() {
     queryKey: ["/api/servers"],
   });
 
+  const { data: availableClients } = useQuery<PatchToken[]>({
+    queryKey: ["/api/patches/available"],
+  });
+
   const createMutation = useMutation({
     mutationFn: async (data: any) => {
       const res = await apiRequest("POST", "/api/licenses", data);
@@ -90,6 +94,8 @@ export default function Licenses() {
       queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity-logs"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/patches/available"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/patches"] });
       setShowCreate(false);
       if (data?.deployResult?.success) {
         toast({ title: "تم إنشاء الترخيص ونشره على السيرفر بنجاح" });
@@ -385,6 +391,7 @@ export default function Licenses() {
         open={showCreate}
         onOpenChange={setShowCreate}
         servers={serversList || []}
+        availableClients={availableClients || []}
         onSubmit={(data) => createMutation.mutate(data)}
         isPending={createMutation.isPending}
       />
@@ -422,13 +429,15 @@ export default function Licenses() {
   );
 }
 
-function CreateLicenseDialog({ open, onOpenChange, servers, onSubmit, isPending }: {
+function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, onSubmit, isPending }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   servers: ServerType[];
+  availableClients: PatchToken[];
   onSubmit: (data: any) => void;
   isPending: boolean;
 }) {
+  const [selectedPatchId, setSelectedPatchId] = useState("");
   const [form, setForm] = useState({
     licenseId: "",
     serverId: "",
@@ -438,6 +447,21 @@ function CreateLicenseDialog({ open, onOpenChange, servers, onSubmit, isPending 
     clientId: "",
     notes: "",
   });
+
+  const selectedPatch = availableClients.find((p) => p.id === selectedPatchId);
+
+  const handleSelectClient = (patchId: string) => {
+    setSelectedPatchId(patchId);
+    const patch = availableClients.find((p) => p.id === patchId);
+    if (patch) {
+      setForm((prev) => ({
+        ...prev,
+        clientId: patch.personName,
+        serverId: patch.serverId || "",
+        licenseId: prev.licenseId || `LIC-${Date.now().toString(36).toUpperCase()}`,
+      }));
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -449,6 +473,7 @@ function CreateLicenseDialog({ open, onOpenChange, servers, onSubmit, isPending 
       serverId: form.serverId || null,
       clientId: form.clientId || null,
       notes: form.notes || null,
+      patchTokenId: selectedPatchId || undefined,
     });
   };
 
@@ -457,9 +482,31 @@ function CreateLicenseDialog({ open, onOpenChange, servers, onSubmit, isPending 
       <DialogContent className="max-w-lg" dir="rtl">
         <DialogHeader>
           <DialogTitle>إنشاء ترخيص جديد</DialogTitle>
-          <DialogDescription>أدخل بيانات الترخيص الجديد</DialogDescription>
+          <DialogDescription>اختر عميل من القائمة أو أدخل البيانات يدوياً</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {availableClients.length > 0 && (
+            <div className="space-y-2">
+              <Label>العملاء المتاحين (من الباتشات)</Label>
+              <Select value={selectedPatchId} onValueChange={handleSelectClient}>
+                <SelectTrigger data-testid="select-available-client">
+                  <SelectValue placeholder="اختر عميل متاح..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableClients.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.personName} {p.activatedHostname ? `— ${p.activatedHostname}` : ""} {p.activatedIp ? `(${p.activatedIp})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedPatch && (
+                <p className="text-xs text-muted-foreground">
+                  السيرفر والاسم سيتعبأن تلقائياً — أضف المدة وعدد المستخدمين والمواقع
+                </p>
+              )}
+            </div>
+          )}
           <div className="space-y-2">
             <Label>معرف الترخيص</Label>
             <Input
@@ -470,19 +517,21 @@ function CreateLicenseDialog({ open, onOpenChange, servers, onSubmit, isPending 
               data-testid="input-license-id"
             />
           </div>
-          <div className="space-y-2">
-            <Label>السيرفر</Label>
-            <Select value={form.serverId} onValueChange={(v) => setForm({ ...form, serverId: v })}>
-              <SelectTrigger data-testid="select-server">
-                <SelectValue placeholder="اختر سيرفر (اختياري)" />
-              </SelectTrigger>
-              <SelectContent>
-                {servers.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.name} ({s.host})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {!selectedPatchId && (
+            <div className="space-y-2">
+              <Label>السيرفر</Label>
+              <Select value={form.serverId} onValueChange={(v) => setForm({ ...form, serverId: v })}>
+                <SelectTrigger data-testid="select-server">
+                  <SelectValue placeholder="اختر سيرفر (اختياري)" />
+                </SelectTrigger>
+                <SelectContent>
+                  {servers.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name} ({s.host})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>الحد الأقصى للمستخدمين</Label>
@@ -515,15 +564,17 @@ function CreateLicenseDialog({ open, onOpenChange, servers, onSubmit, isPending 
               data-testid="input-expires-at"
             />
           </div>
-          <div className="space-y-2">
-            <Label>معرف العميل (اختياري)</Label>
-            <Input
-              value={form.clientId}
-              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
-              placeholder="مثال: CLIENT-001"
-              data-testid="input-client-id"
-            />
-          </div>
+          {!selectedPatchId && (
+            <div className="space-y-2">
+              <Label>معرف العميل (اختياري)</Label>
+              <Input
+                value={form.clientId}
+                onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+                placeholder="مثال: CLIENT-001"
+                data-testid="input-client-id"
+              />
+            </div>
+          )}
           <div className="space-y-2">
             <Label>ملاحظات (اختياري)</Label>
             <Textarea

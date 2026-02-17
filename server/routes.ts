@@ -315,10 +315,23 @@ export async function registerRoutes(
   });
 
   app.post("/api/licenses", async (req, res) => {
-    const body = { ...req.body };
+    const { patchTokenId, ...rest } = req.body;
+    const body = { ...rest };
     if (typeof body.expiresAt === "string") {
       body.expiresAt = new Date(body.expiresAt);
     }
+
+    let patchData: any = null;
+    if (patchTokenId) {
+      const patch = await storage.getPatchToken(patchTokenId);
+      if (!patch || patch.status !== "used" || patch.licenseId) {
+        return res.status(400).json({ message: "العميل المحدد غير متاح أو مرتبط بترخيص آخر" });
+      }
+      patchData = patch;
+      if (!body.serverId && patch.serverId) body.serverId = patch.serverId;
+      if (!body.clientId) body.clientId = patch.personName;
+    }
+
     const parsed = insertLicenseSchema.safeParse(body);
     if (!parsed.success) {
       return res.status(400).json({ message: parsed.error.message });
@@ -342,9 +355,18 @@ export async function registerRoutes(
 
     const license = await storage.createLicense(parsed.data);
 
-    const hwidSalt = crypto.randomBytes(16).toString("hex");
+    const hwidSalt = patchData?.hwidSalt || crypto.randomBytes(16).toString("hex");
     const updateData: any = { status: "active", hwidSalt };
+    if (patchData?.hardwareId) {
+      updateData.hardwareId = patchData.hardwareId;
+    }
     await storage.updateLicense(license.id, updateData);
+
+    if (patchData) {
+      await storage.updatePatchToken(patchData.id, {
+        licenseId: license.id,
+      });
+    }
 
     await storage.createActivityLog({
       licenseId: license.id,
@@ -1347,10 +1369,7 @@ echo "Installation completed successfully"
         sections: [
           { label: "اسم الشخص", value: parsed.data.personName },
           { label: "التوكن", value: token.substring(0, 16) + "...", mono: true },
-          { label: "أقصى مستخدمين", value: String(parsed.data.maxUsers ?? 100) },
-          { label: "أقصى مواقع", value: String(parsed.data.maxSites ?? 1) },
-          { label: "مدة الترخيص", value: `${parsed.data.durationDays ?? 30} يوم` },
-          { label: "طريقة الاستخدام", value: "يتم تنزيل install.sh وتشغيله على السيرفر البعيد → يجمع HWID تلقائياً ويسجل كل شيء" },
+          { label: "طريقة الاستخدام", value: "يرسل أمر التثبيت للشخص → ينفذه على سيرفره → يظهر بقائمة العملاء المتاحين → تنشئ له ترخيص" },
         ],
       }),
     });
@@ -1389,6 +1408,15 @@ echo "Installation completed successfully"
     }
 
     res.json({ success: true });
+  });
+
+  // ─── Available Clients (used patches without licenses) ────────────────
+  app.get("/api/patches/available", async (_req, res) => {
+    const allPatches = await storage.getPatchTokens();
+    const available = allPatches.filter(
+      (p) => p.status === "used" && !p.licenseId && p.serverId
+    );
+    res.json(available);
   });
 
   // ─── Patch Run (Public - curl | sudo bash) - Thin Agent in Memory ────────────────
@@ -1481,38 +1509,24 @@ sys.stdout.write(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
       lastChecked: new Date(),
     });
 
-    const licenseId = `PATCH-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
-    const expiresAt = new Date(Date.now() + patch.durationDays * 24 * 60 * 60 * 1000);
-
-    const license = await storage.createLicense({
-      licenseId,
+    await storage.updatePatchToken(patch.id, {
+      status: "used",
+      usedAt: new Date(),
       serverId: server.id,
-      expiresAt,
-      maxUsers: patch.maxUsers,
-      maxSites: patch.maxSites,
-      clientId: patch.personName,
-      notes: `باتش تلقائي - ${patch.personName}${patch.notes ? ` | ${patch.notes}` : ""}`,
-      signature: null,
-    });
-
-    await storage.updateLicense(license.id, {
-      status: "active",
+      activatedHostname: hostname || serverHost,
+      activatedIp: serverHost,
       hardwareId: hwid,
       hwidSalt,
     });
 
-    await storage.updatePatchToken(patch.id, {
-      status: "used",
-      usedAt: new Date(),
-      licenseId: license.id,
-      serverId: server.id,
-    });
+    const provLicenseId = `PATCH-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+    const provExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     const baseUrl = getBaseUrl(req);
     const emulatorScript = generateObfuscatedEmulator(
-      hwid, licenseId, expiresAt, patch.maxUsers, patch.maxSites, "active", baseUrl
+      hwid, provLicenseId, provExpiresAt, patch.maxUsers, patch.maxSites, "active", baseUrl
     );
-    const verifyScript = generateObfuscatedVerify(licenseId, baseUrl, undefined, hwidSalt);
+    const verifyScript = generateObfuscatedVerify(provLicenseId, baseUrl, undefined, hwidSalt);
 
     const deployPayload = generatePatchDeployPayload(emulatorScript, verifyScript);
     const encryptedPayload = xorEncryptPayload(deployPayload, token);
@@ -1524,33 +1538,28 @@ sys.stdout.write(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
     });
 
     await storage.createActivityLog({
-      licenseId: license.id,
       serverId: server.id,
       action: "patch_activate",
       details: JSON.stringify({
-        title: `تم تفعيل باتش ${patch.personName} تلقائياً`,
+        title: `تم تثبيت الباتش — ${patch.personName} بانتظار إنشاء الترخيص`,
         sections: [
           { label: "اسم الشخص", value: patch.personName },
-          { label: "معرف الترخيص", value: licenseId },
           { label: "السيرفر", value: `${serverName} (${serverHost})` },
           { label: "Hostname", value: hostname || "غير متوفر" },
           { label: "HWID (مع Salt)", value: hwid.substring(0, 32) + "...", mono: true },
           { label: "HWID Salt", value: hwidSalt, mono: true },
-          { label: "مدة الترخيص", value: `${patch.durationDays} يوم` },
-          { label: "تاريخ الانتهاء", value: expiresAt.toLocaleString("ar-IQ") },
-          { label: "أقصى مستخدمين", value: String(patch.maxUsers) },
-          { label: "أقصى مواقع", value: String(patch.maxSites) },
           { label: "Raw HWID Sources", value: "machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial", mono: true },
           { label: "حساب HWID", value: `SHA256(raw_hwid + ":" + ${hwidSalt})`, mono: true },
           { label: "IP المرسل", value: req.ip || "غير معروف" },
           { label: "نوع التسليم", value: "Ephemeral token (30s TTL)" },
+          { label: "الحالة", value: "بانتظار إنشاء الترخيص من لوحة التحكم" },
         ],
       }),
     });
 
     res.json({
       success: true,
-      license_id: licenseId,
+      license_id: provLicenseId,
       eph: ephemeralId,
     });
   });

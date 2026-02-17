@@ -86,6 +86,10 @@ export const patchTokens = pgTable("patch_tokens", {
   licenseId: varchar("license_id"),
   serverId: varchar("server_id"),
   notes: text("notes"),
+  activatedHostname: text("activated_hostname"),
+  activatedIp: text("activated_ip"),
+  hardwareId: text("hardware_id"),
+  hwidSalt: text("hwid_salt"),
   usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -96,6 +100,10 @@ export const insertPatchTokenSchema = createInsertSchema(patchTokens).omit({
   status: true,
   licenseId: true,
   serverId: true,
+  activatedHostname: true,
+  activatedIp: true,
+  hardwareId: true,
+  hwidSalt: true,
   usedAt: true,
   createdAt: true,
 });
