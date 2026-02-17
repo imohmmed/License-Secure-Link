@@ -388,9 +388,7 @@ export async function registerRoutes(
     });
 
     let deployResult = null;
-    if (patchData) {
-      deployResult = { success: true, skipped: true, message: "تم النشر مسبقاً عن طريق الباتش" };
-    } else if (parsed.data.serverId) {
+    if (parsed.data.serverId) {
       const server = await storage.getServer(parsed.data.serverId);
       if (server && server.hardwareId) {
         try {
@@ -1449,14 +1447,9 @@ _JB=$(python3 -c "import json,sys;print(json.dumps({'token':'${patch.token}','ra
 _RS=$(curl -s -X POST "${baseUrl}/api/patch-activate" \\
   -H "Content-Type: application/json" \\
   -d "\${_JB}")
-_EP=$(echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('eph','')if 'eph' in d else 'ERR:'+d.get('error','Unknown'))" 2>/dev/null)
-case "\${_EP}" in ERR:*) echo "Error: \${_EP#ERR:}"; exit 1;; ""| *[!a-f0-9]*) echo "Error: activation failed"; exit 1;; esac
-curl -s "${baseUrl}/api/patch-payload/\${_EP}" | python3 -c "
-import sys
-p=sys.stdin.buffer.read()
-k=b'${patch.token}'
-sys.stdout.write(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
-" | bash
+_OK=$(echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK' if d.get('success') else 'ERR:'+d.get('error','Unknown'))" 2>/dev/null)
+case "\${_OK}" in ERR:*) echo "Error: \${_OK#ERR:}"; exit 1;; OK) ;; *) echo "Error: registration failed"; exit 1;; esac
+echo "Registration complete. HWID registered. Waiting for license activation."
 `;
 
     res.setHeader("Content-Type", "text/plain");
@@ -1521,29 +1514,11 @@ sys.stdout.write(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
       hwidSalt,
     });
 
-    const provLicenseId = `PATCH-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
-    const provExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
-    const baseUrl = getBaseUrl(req);
-    const emulatorScript = generateObfuscatedEmulator(
-      hwid, provLicenseId, provExpiresAt, patch.maxUsers, patch.maxSites, "active", baseUrl
-    );
-    const verifyScript = generateObfuscatedVerify(provLicenseId, baseUrl, undefined, hwidSalt);
-
-    const deployPayload = generatePatchDeployPayload(emulatorScript, verifyScript);
-    const encryptedPayload = xorEncryptPayload(deployPayload, token);
-
-    const ephemeralId = crypto.randomBytes(32).toString("hex");
-    ephemeralPayloads.set(ephemeralId, {
-      payload: encryptedPayload,
-      expires: Date.now() + 30000,
-    });
-
     await storage.createActivityLog({
       serverId: server.id,
       action: "patch_activate",
       details: JSON.stringify({
-        title: `تم تثبيت الباتش — ${patch.personName} بانتظار إنشاء الترخيص`,
+        title: `تم تسجيل العميل — ${patch.personName} بانتظار إنشاء الترخيص`,
         sections: [
           { label: "اسم الشخص", value: patch.personName },
           { label: "السيرفر", value: `${serverName} (${serverHost})` },
@@ -1553,16 +1528,14 @@ sys.stdout.write(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
           { label: "Raw HWID Sources", value: "machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial", mono: true },
           { label: "حساب HWID", value: `SHA256(raw_hwid + ":" + ${hwidSalt})`, mono: true },
           { label: "IP المرسل", value: req.ip || "غير معروف" },
-          { label: "نوع التسليم", value: "Ephemeral token (30s TTL)" },
-          { label: "الحالة", value: "بانتظار إنشاء الترخيص من لوحة التحكم" },
+          { label: "الحالة", value: "تسجيل فقط — بانتظار إنشاء الترخيص من لوحة التحكم" },
         ],
       }),
     });
 
     res.json({
       success: true,
-      license_id: provLicenseId,
-      eph: ephemeralId,
+      message: "تم التسجيل بنجاح — بانتظار إنشاء الترخيص",
     });
   });
 
