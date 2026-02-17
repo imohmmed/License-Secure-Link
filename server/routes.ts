@@ -328,7 +328,6 @@ export async function registerRoutes(
         return res.status(400).json({ message: "العميل المحدد غير متاح أو مرتبط بترخيص آخر" });
       }
       patchData = patch;
-      if (!body.serverId && patch.serverId) body.serverId = patch.serverId;
       if (!body.clientId) body.clientId = patch.personName;
     }
 
@@ -1488,26 +1487,10 @@ echo "Registration complete. HWID registered. Waiting for license activation."
     const hwid = crypto.createHash("sha256").update(`${raw_hwid}:${hwidSalt}`).digest("hex");
 
     const serverHost = ip || req.ip || "unknown";
-    const serverName = `${patch.personName} - ${hostname || serverHost}`;
-
-    const server = await storage.createServer({
-      name: serverName,
-      host: serverHost,
-      port: 22,
-      username: "root",
-      password: "patch-installed",
-    });
-
-    await storage.updateServer(server.id, {
-      hardwareId: hwid,
-      isConnected: true,
-      lastChecked: new Date(),
-    });
 
     await storage.updatePatchToken(patch.id, {
       status: "used",
       usedAt: new Date(),
-      serverId: server.id,
       activatedHostname: hostname || serverHost,
       activatedIp: serverHost,
       hardwareId: hwid,
@@ -1515,19 +1498,15 @@ echo "Registration complete. HWID registered. Waiting for license activation."
     });
 
     await storage.createActivityLog({
-      serverId: server.id,
       action: "patch_activate",
       details: JSON.stringify({
         title: `تم تسجيل العميل — ${patch.personName} بانتظار إنشاء الترخيص`,
         sections: [
           { label: "اسم الشخص", value: patch.personName },
-          { label: "السيرفر", value: `${serverName} (${serverHost})` },
           { label: "Hostname", value: hostname || "غير متوفر" },
+          { label: "IP", value: serverHost },
           { label: "HWID (مع Salt)", value: hwid.substring(0, 32) + "...", mono: true },
           { label: "HWID Salt", value: hwidSalt, mono: true },
-          { label: "Raw HWID Sources", value: "machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial", mono: true },
-          { label: "حساب HWID", value: `SHA256(raw_hwid + ":" + ${hwidSalt})`, mono: true },
-          { label: "IP المرسل", value: req.ip || "غير معروف" },
           { label: "الحالة", value: "تسجيل فقط — بانتظار إنشاء الترخيص من لوحة التحكم" },
         ],
       }),

@@ -457,7 +457,6 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
       setForm((prev) => ({
         ...prev,
         clientId: patch.personName,
-        serverId: patch.serverId || "",
         licenseId: prev.licenseId || `LIC-${Date.now().toString(36).toUpperCase()}`,
       }));
     }
@@ -517,21 +516,19 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
               data-testid="input-license-id"
             />
           </div>
-          {!selectedPatchId && (
-            <div className="space-y-2">
-              <Label>السيرفر</Label>
-              <Select value={form.serverId} onValueChange={(v) => setForm({ ...form, serverId: v })}>
-                <SelectTrigger data-testid="select-server">
-                  <SelectValue placeholder="اختر سيرفر (اختياري)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {servers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name} ({s.host})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+          <div className="space-y-2">
+            <Label>السيرفر {selectedPatchId ? "(اختر السيرفر للنشر عليه)" : ""}</Label>
+            <Select value={form.serverId} onValueChange={(v) => setForm({ ...form, serverId: v })}>
+              <SelectTrigger data-testid="select-server">
+                <SelectValue placeholder="اختر سيرفر..." />
+              </SelectTrigger>
+              <SelectContent>
+                {servers.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.name} ({s.host})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>الحد الأقصى للمستخدمين</Label>
