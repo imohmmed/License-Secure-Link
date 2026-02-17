@@ -347,7 +347,8 @@ export async function registerRoutes(
         return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
       }
       const serverLicenses = await storage.getLicensesByServerId(parsed.data.serverId);
-      if (serverLicenses.length > 0) {
+      const activeLicenses = serverLicenses.filter(l => l.status === "active");
+      if (activeLicenses.length > 0) {
         return res.status(409).json({ message: "لديك ترخيص مسبق على هذا السيرفر - لا يمكن إنشاء ترخيص آخر لنفس السيرفر" });
       }
     }
@@ -389,11 +390,13 @@ export async function registerRoutes(
     let deployResult = null;
     if (parsed.data.serverId) {
       const server = await storage.getServer(parsed.data.serverId);
-      if (server && server.hardwareId) {
+      const licenseRecord = await storage.getLicense(license.id);
+      const deployHwid = licenseRecord?.hardwareId || server?.hardwareId;
+      if (server && deployHwid) {
         try {
           const result = await deployLicenseToServer(
             server.host, server.port, server.username, server.password,
-            server.hardwareId, parsed.data.licenseId,
+            deployHwid, parsed.data.licenseId,
             new Date(parsed.data.expiresAt), parsed.data.maxUsers ?? 1000, parsed.data.maxSites ?? 1,
             "active", getBaseUrl(req), hwidSalt
           );
@@ -407,7 +410,7 @@ export async function registerRoutes(
                 title: `تم نشر الترخيص ${parsed.data.licenseId} تلقائياً على السيرفر ${server.name}`,
                 sections: [
                   { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
-                  { label: "HWID المستخدم", value: server.hardwareId || "غير متوفر", mono: true },
+                  { label: "HWID المستخدم", value: deployHwid || "غير متوفر", mono: true },
                   { label: "HWID Salt", value: hwidSalt, mono: true },
                   { label: "مسار التثبيت", value: DEPLOY.BASE, mono: true },
                   { label: "ملف الإيميوليتر", value: DEPLOY.EMULATOR, mono: true },
