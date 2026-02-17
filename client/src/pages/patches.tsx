@@ -266,21 +266,26 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
   onSubmit: (data: any) => void;
   isPending: boolean;
 }) {
+  const defaultExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
   const [form, setForm] = useState({
     personName: "",
     maxUsers: "1000",
     maxSites: "1",
-    durationDays: "30",
+    expiresAt: defaultExpiry,
     notes: "",
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const expiryDate = new Date(form.expiresAt);
+    const now = new Date();
+    const diffMs = expiryDate.getTime() - now.getTime();
+    const durationDays = Math.max(1, Math.ceil(diffMs / (24 * 60 * 60 * 1000)));
     onSubmit({
       personName: form.personName,
       maxUsers: parseInt(form.maxUsers),
       maxSites: parseInt(form.maxSites),
-      durationDays: parseInt(form.durationDays),
+      durationDays,
       notes: form.notes || null,
     });
   };
@@ -303,7 +308,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
               data-testid="input-person-name"
             />
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>الحد الأقصى للمستخدمين</Label>
               <Input
@@ -324,16 +329,16 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
                 data-testid="input-patch-max-sites"
               />
             </div>
-            <div className="space-y-2">
-              <Label>مدة الترخيص (أيام)</Label>
-              <Input
-                type="number"
-                value={form.durationDays}
-                onChange={(e) => setForm({ ...form, durationDays: e.target.value })}
-                required
-                data-testid="input-patch-duration"
-              />
-            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>تاريخ انتهاء الترخيص</Label>
+            <Input
+              type="datetime-local"
+              value={form.expiresAt}
+              onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
+              required
+              data-testid="input-patch-expires-at"
+            />
           </div>
           <div className="space-y-2">
             <Label>ملاحظات (اختياري)</Label>
