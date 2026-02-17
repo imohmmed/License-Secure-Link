@@ -97,7 +97,9 @@ export default function Licenses() {
       queryClient.invalidateQueries({ queryKey: ["/api/patches/available"] });
       queryClient.invalidateQueries({ queryKey: ["/api/patches"] });
       setShowCreate(false);
-      if (data?.deployResult?.success) {
+      if (data?.deployResult?.skipped) {
+        toast({ title: "تم إنشاء الترخيص بنجاح", description: "الملفات منشورة مسبقاً عن طريق الباتش" });
+      } else if (data?.deployResult?.success) {
         toast({ title: "تم إنشاء الترخيص ونشره على السيرفر بنجاح" });
       } else if (data?.deployResult && !data.deployResult.success) {
         toast({ title: "تم إنشاء الترخيص", description: `فشل النشر التلقائي: ${data.deployResult.error || "خطأ غير معروف"} - يمكنك النشر يدوياً`, variant: "destructive" });

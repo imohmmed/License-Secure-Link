@@ -388,7 +388,9 @@ export async function registerRoutes(
     });
 
     let deployResult = null;
-    if (parsed.data.serverId) {
+    if (patchData) {
+      deployResult = { success: true, skipped: true, message: "تم النشر مسبقاً عن طريق الباتش" };
+    } else if (parsed.data.serverId) {
       const server = await storage.getServer(parsed.data.serverId);
       if (server && server.hardwareId) {
         try {
