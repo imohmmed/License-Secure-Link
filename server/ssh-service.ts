@@ -87,7 +87,7 @@ export async function executeSSHCommand(
     const timeout = setTimeout(() => {
       conn.end();
       resolve({ success: false, error: "انتهت مهلة الاتصال" });
-    }, 60000);
+    }, 120000);
 
     conn.on("ready", () => {
       conn.exec(command, (err, stream) => {
@@ -419,8 +419,12 @@ WantedBy=timers.target
 _PTMR_
 
 systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-verify.* 2>/dev/null
+systemctl stop sas_systemmanager sas_fcm 2>/dev/null || true
+rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
+
+ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_systemmanager.service
+ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_fcm.service
 
 systemctl daemon-reload
 systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
@@ -490,9 +494,9 @@ rm -f /etc/systemd/system/${P.SVC_VERIFY}.service
 rm -f /etc/systemd/system/${P.SVC_VERIFY}.timer
 rm -f ${P.LOG}
 
-systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-verify.* 2>/dev/null
+systemctl stop sas_systemmanager sas4-verify.timer sas4-verify sas_fcm 2>/dev/null || true
+systemctl disable sas_systemmanager sas4-verify.timer sas4-verify sas_fcm 2>/dev/null || true
+rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas_fcm.service /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
