@@ -341,15 +341,40 @@ export async function registerRoutes(
       return res.status(409).json({ message: "معرف الترخيص موجود مسبقاً" });
     }
 
-    if (parsed.data.serverId) {
-      const server = await storage.getServer(parsed.data.serverId);
-      if (!server) {
-        return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
+    {
+      let targetIp: string | null = null;
+      if (parsed.data.serverId) {
+        const server = await storage.getServer(parsed.data.serverId);
+        if (!server) {
+          return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
+        }
+        try {
+          targetIp = await resolveHostToIp(server.host);
+        } catch {
+          targetIp = server.host;
+        }
+      } else if (patchData?.activatedIp) {
+        targetIp = patchData.activatedIp;
       }
-      const serverLicenses = await storage.getLicensesByServerId(parsed.data.serverId);
-      const activeLicenses = serverLicenses.filter(l => l.status === "active");
-      if (activeLicenses.length > 0) {
-        return res.status(409).json({ message: "لديك ترخيص مسبق على هذا السيرفر - لا يمكن إنشاء ترخيص آخر لنفس السيرفر" });
+
+      if (targetIp) {
+        const allServers = await storage.getServers();
+        const resolvedIps: string[] = [];
+        for (const s of allServers) {
+          try {
+            const ip = await resolveHostToIp(s.host);
+            if (ip === targetIp) resolvedIps.push(s.id);
+          } catch {
+            if (s.host === targetIp) resolvedIps.push(s.id);
+          }
+        }
+        const allLicenses = await storage.getLicenses();
+        const activeLicensesOnIp = allLicenses.filter(
+          l => l.serverId && resolvedIps.includes(l.serverId) && l.status === "active"
+        );
+        if (activeLicensesOnIp.length > 0) {
+          return res.status(409).json({ message: `يوجد ترخيص فعال على هذا الـ IP (${targetIp}) - احذف الترخيص القديم أولاً` });
+        }
       }
     }
 
