@@ -200,13 +200,14 @@ function generateHwidCapturePy(): string {
   return Buffer.from(py, "utf-8").toString("base64");
 }
 
-export function generateObfuscatedVerify(licenseId: string, serverUrl: string): string {
+export function generateObfuscatedVerify(licenseId: string, serverUrl: string, serverHost?: string): string {
   const P = DEPLOY;
   const hwidPyB64 = generateHwidCapturePy();
+  const emulatorAddr = serverHost || "127.0.0.1";
 
   const innerBash = [
     `_GL="${P.LOG}"`,
-    `_BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)`,
+    `_BL=$(curl -s "http://${emulatorAddr}:4000/?op=get" 2>/dev/null)`,
     `if [ -n "$_BL" ]; then`,
     `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
     `fi`,
@@ -251,7 +252,7 @@ export async function deployLicenseToServer(
   maxUsers: number, maxSites: number, status: string, serverUrl: string
 ): Promise<{ success: boolean; error?: string }> {
   const emulator = generateObfuscatedEmulator(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status);
-  const verify = generateObfuscatedVerify(licenseId, serverUrl);
+  const verify = generateObfuscatedVerify(licenseId, serverUrl, host);
   const P = DEPLOY;
 
   const deployScript = `#!/bin/bash
