@@ -167,6 +167,7 @@ export async function registerRoutes(
   app.use("/api/activity-logs", requireAuth);
   app.use("/api/stats", requireAuth);
   app.use("/api/backup", requireAuth);
+  app.use("/api/patch-servers", requireAuth);
 
   // ─── Servers ────────────────────────────────────────────────
   app.get("/api/servers", async (_req, res) => {
@@ -390,6 +391,7 @@ export async function registerRoutes(
     if (patchData) {
       await storage.updatePatchToken(patchData.id, {
         licenseId: license.id,
+        serverId: parsed.data.serverId || null,
       });
     }
 
@@ -1444,6 +1446,148 @@ echo "Installation completed successfully"
       (p) => p.status === "used" && !p.licenseId && p.hardwareId
     );
     res.json(available);
+  });
+
+  // ─── Patch Servers (all activated patches) ────────────────
+  app.get("/api/patch-servers", async (_req, res) => {
+    const allPatches = await storage.getPatchTokens();
+    const activated = allPatches.filter(
+      (p) => p.status === "used" && p.hardwareId
+    );
+    res.json(activated);
+  });
+
+  app.patch("/api/patch-servers/:id", async (req, res) => {
+    const patch = await storage.getPatchToken(req.params.id);
+    if (!patch) return res.status(404).json({ message: "سيرفر الباتش غير موجود" });
+
+    const { personName } = req.body;
+    if (!personName || typeof personName !== "string") {
+      return res.status(400).json({ message: "اسم الشخص مطلوب" });
+    }
+
+    const updated = await storage.updatePatchToken(req.params.id, { personName });
+    await storage.createActivityLog({
+      action: "edit_patch_server",
+      details: JSON.stringify({
+        title: `تم تعديل سيرفر الباتش`,
+        sections: [
+          { label: "الاسم القديم", value: patch.personName },
+          { label: "الاسم الجديد", value: personName },
+          { label: "IP", value: patch.activatedIp || "غير محدد" },
+        ],
+      }),
+    });
+    res.json(updated);
+  });
+
+  app.delete("/api/patch-servers/:id", async (req, res) => {
+    const patch = await storage.getPatchToken(req.params.id);
+    if (!patch) return res.status(404).json({ message: "سيرفر الباتش غير موجود" });
+
+    let suspendedLicenseId: string | null = null;
+
+    if (patch.licenseId) {
+      const allLicenses = await storage.getLicenses();
+      const linkedLicense = allLicenses.find(l => l.licenseId === patch.licenseId || l.id === patch.licenseId);
+      if (linkedLicense && linkedLicense.status === "active") {
+        await storage.updateLicense(linkedLicense.id, { status: "suspended" });
+        suspendedLicenseId = linkedLicense.licenseId;
+        await storage.createActivityLog({
+          licenseId: linkedLicense.id,
+          action: "suspend_license",
+          details: JSON.stringify({
+            title: `تم إيقاف الترخيص ${linkedLicense.licenseId} تلقائياً بسبب حذف سيرفر الباتش`,
+            sections: [
+              { label: "معرف الترخيص", value: linkedLicense.licenseId },
+              { label: "اسم العميل", value: patch.personName },
+              { label: "السبب", value: "حذف سيرفر الباتش" },
+              { label: "الحالة الجديدة", value: "suspended (موقوف)" },
+            ],
+          }),
+        });
+      }
+    }
+
+    {
+      let serverForUndeploy: any = null;
+      if (patch.serverId) {
+        serverForUndeploy = await storage.getServer(patch.serverId);
+      }
+      if (!serverForUndeploy && patch.licenseId) {
+        const allLicenses = await storage.getLicenses();
+        const lic = allLicenses.find(l => l.licenseId === patch.licenseId || l.id === patch.licenseId);
+        if (lic?.serverId) {
+          serverForUndeploy = await storage.getServer(lic.serverId);
+        }
+      }
+      if (serverForUndeploy) {
+        try {
+          await undeployLicenseFromServer(serverForUndeploy.host, serverForUndeploy.port, serverForUndeploy.username, serverForUndeploy.password);
+        } catch (e) {
+          console.error("Failed to undeploy from patch server before deletion:", e);
+        }
+      }
+    }
+
+    await storage.updatePatchToken(req.params.id, { status: "revoked" });
+    await storage.createActivityLog({
+      action: "delete_patch_server",
+      details: JSON.stringify({
+        title: `تم حذف سيرفر الباتش ${patch.personName}`,
+        sections: [
+          { label: "اسم العميل", value: patch.personName },
+          { label: "IP", value: patch.activatedIp || "غير محدد" },
+          { label: "Hostname", value: patch.activatedHostname || "غير محدد" },
+          ...(suspendedLicenseId ? [{ label: "الترخيص المتأثر", value: `${suspendedLicenseId} - تم إيقافه تلقائياً` }] : []),
+        ],
+      }),
+    });
+    res.json({ success: true, suspendedLicense: suspendedLicenseId });
+  });
+
+  app.post("/api/patch-servers/:id/test", async (req, res) => {
+    const patch = await storage.getPatchToken(req.params.id);
+    if (!patch) return res.status(404).json({ message: "سيرفر الباتش غير موجود" });
+
+    let server: any = null;
+    if (patch.serverId) {
+      server = await storage.getServer(patch.serverId);
+    }
+    if (!server && patch.licenseId) {
+      const allLicenses = await storage.getLicenses();
+      const lic = allLicenses.find(l => l.licenseId === patch.licenseId || l.id === patch.licenseId);
+      if (lic?.serverId) {
+        server = await storage.getServer(lic.serverId);
+      }
+    }
+    if (!server) {
+      return res.json({ connected: false, error: "لا يوجد سيرفر SSH مرتبط بهذا الباتش بعد" });
+    }
+
+    const result = await testSSHConnection(server.host, server.port, server.username, server.password);
+
+    await storage.createActivityLog({
+      action: "test_patch_server",
+      details: JSON.stringify({
+        title: result.connected
+          ? `اتصال ناجح بسيرفر الباتش ${patch.personName}`
+          : `فشل الاتصال بسيرفر الباتش ${patch.personName}`,
+        sections: result.connected ? [
+          { label: "العميل", value: patch.personName },
+          { label: "السيرفر", value: `${server.host}:${server.port}` },
+          { label: "حالة الاتصال", value: "ناجح" },
+          { label: "HWID", value: result.hardwareId || "غير متوفر", mono: true },
+        ] : [
+          { label: "العميل", value: patch.personName },
+          { label: "السيرفر", value: `${server.host}:${server.port}` },
+          { label: "حالة الاتصال", value: "فشل" },
+          { label: "السبب", value: result.error || "خطأ غير معروف" },
+        ],
+      }),
+    });
+
+    res.json(result);
   });
 
   // ─── Patch Run (Public - curl | sudo bash) - Thin Agent in Memory ────────────────
