@@ -35,6 +35,10 @@ A centralized license management system (License Authority) for SAS4 software. U
   - Client runs install.sh on their server → collects HWID → auto-registers server + license
   - License tagged with person's name (appears in licenses page)
   - Admin can suspend/revoke patch licenses normally
+  - Install script is obfuscated (base64 + eval wrapper, not readable plaintext)
+  - Token is single-use: once activated, cannot be reused
+  - **Heartbeat monitor**: Active licenses auto-suspend after 12 hours without verification (2 missed cycles)
+  - If client deletes services from server → verification stops → license auto-suspends
 
 ## Project Structure
 ```

