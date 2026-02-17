@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, generatePatchDeployPayload, xorEncryptPayload, DEPLOY } from "./ssh-service";
+import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, generatePatchDeployPayload, xorEncryptPayload, computeRemoteHWID, DEPLOY } from "./ssh-service";
 import { insertServerSchema, insertLicenseSchema, insertPatchTokenSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 import bcrypt from "bcryptjs";
@@ -429,6 +429,10 @@ export async function registerRoutes(
           );
           deployResult = result;
           if (result.success) {
+            if (result.computedHwid) {
+              await storage.updateLicense(license.id, { hardwareId: result.computedHwid });
+            }
+            const finalDeployHwid = result.computedHwid || deployHwid;
             await storage.createActivityLog({
               licenseId: license.id,
               serverId: parsed.data.serverId,
@@ -437,7 +441,7 @@ export async function registerRoutes(
                 title: `تم نشر الترخيص ${parsed.data.licenseId} تلقائياً على السيرفر ${server.name}`,
                 sections: [
                   { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
-                  { label: "HWID المستخدم", value: deployHwid || "غير متوفر", mono: true },
+                  { label: "HWID المستخدم", value: finalDeployHwid || "غير متوفر", mono: true },
                   { label: "HWID Salt", value: hwidSalt, mono: true },
                   { label: "مسار التثبيت", value: DEPLOY.BASE, mono: true },
                   { label: "ملف الإيميوليتر", value: DEPLOY.EMULATOR, mono: true },
@@ -499,12 +503,15 @@ export async function registerRoutes(
       const server = await storage.getServer(license.serverId);
       if (server) {
         try {
-          await deployLicenseToServer(
+          const deployResult = await deployLicenseToServer(
             server.host, server.port, server.username, server.password,
             license.hardwareId, license.licenseId,
             new Date(license.expiresAt), license.maxUsers, license.maxSites,
             status, getBaseUrl(req), license.hwidSalt || undefined
           );
+          if (deployResult.success && deployResult.computedHwid) {
+            await storage.updateLicense(license.id, { hardwareId: deployResult.computedHwid });
+          }
         } catch (e) {
         }
       }
@@ -592,12 +599,15 @@ export async function registerRoutes(
 
     if (newHardwareId && license.status === "active") {
       try {
-        await deployLicenseToServer(
+        const deployResult = await deployLicenseToServer(
           newServer.host, newServer.port, newServer.username, newServer.password,
           newHardwareId, license.licenseId,
           new Date(license.expiresAt), license.maxUsers, license.maxSites,
           license.status, getBaseUrl(req), license.hwidSalt || undefined
         );
+        if (deployResult.success && deployResult.computedHwid) {
+          await storage.updateLicense(license.id, { hardwareId: deployResult.computedHwid });
+        }
       } catch (e) {
       }
     }
@@ -632,7 +642,8 @@ export async function registerRoutes(
 
     if (result.success) {
       const updates: any = {};
-      if (!license.hardwareId) updates.hardwareId = hwid;
+      const finalHwid = result.computedHwid || hwid;
+      if (result.computedHwid || !license.hardwareId) updates.hardwareId = finalHwid;
       if (license.status === "inactive") updates.status = "active";
       if (Object.keys(updates).length > 0) {
         await storage.updateLicense(req.params.id, updates);
@@ -647,7 +658,7 @@ export async function registerRoutes(
           title: `تم نشر الترخيص ${license.licenseId} على السيرفر ${server.name}`,
           sections: [
             { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
-            { label: "HWID المستخدم", value: hwid, mono: true },
+            { label: "HWID المستخدم", value: finalHwid, mono: true },
             { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
             { label: "حساب HWID على العميل", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
             { label: "مصادر HWID (7 مصادر)", value: "/etc/machine-id ، /sys/class/dmi/id/product_uuid ، MAC Address ، board_serial ، chassis_serial ، disk by-id ، product_serial/cpu" },

@@ -263,12 +263,55 @@ export function generateLicenseFileContent(
   return JSON.stringify(payload, null, 2);
 }
 
+export async function computeRemoteHWID(
+  host: string, port: number, username: string, password: string, hwidSalt: string
+): Promise<{ success: boolean; hwid?: string; rawHwid?: string; error?: string }> {
+  const hwidScript = `#!/bin/bash
+MI=$(cat /etc/machine-id 2>/dev/null || echo "")
+PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
+MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
+BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
+CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
+DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
+CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
+RAW="\${MI}:\${PU}:\${MA}:\${BS}:\${CS}:\${DS}:\${CI}"
+echo "RAW:\${RAW}"
+echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print $1}'
+`;
+  const encoded = Buffer.from(hwidScript, "utf-8").toString("base64");
+  const command = `_t=$(mktemp); echo '${encoded}' | base64 -d > "$_t"; bash "$_t"; rm -f "$_t"`;
+  const result = await executeSSHCommand(host, port, username, password, command);
+  if (!result.success || !result.output) {
+    return { success: false, error: result.error || "Failed to compute HWID" };
+  }
+  const lines = result.output.trim().split("\n");
+  let rawHwid: string | undefined;
+  let hwid: string | undefined;
+  for (const line of lines) {
+    if (line.startsWith("RAW:")) rawHwid = line.substring(4);
+    else if (/^[a-f0-9]{64}/.test(line)) hwid = line.trim().replace(/\s.*/, "");
+  }
+  if (!hwid) {
+    return { success: false, error: "Could not parse HWID from server output" };
+  }
+  return { success: true, hwid, rawHwid };
+}
+
 export async function deployLicenseToServer(
   host: string, port: number, username: string, password: string,
   hardwareId: string, licenseId: string, expiresAt: Date,
   maxUsers: number, maxSites: number, status: string, serverUrl: string, hwidSalt?: string
-): Promise<{ success: boolean; output?: string; error?: string }> {
-  const emulator = generateObfuscatedEmulator(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status, serverUrl);
+): Promise<{ success: boolean; output?: string; error?: string; computedHwid?: string }> {
+  let finalHwid = hardwareId;
+  if (hwidSalt) {
+    const hwidResult = await computeRemoteHWID(host, port, username, password, hwidSalt);
+    if (hwidResult.success && hwidResult.hwid) {
+      finalHwid = hwidResult.hwid;
+    } else {
+      console.warn(`[HWID] Warning: Could not compute HWID on target server ${host}: ${hwidResult.error}. Using fallback HWID.`);
+    }
+  }
+  const emulator = generateObfuscatedEmulator(finalHwid, licenseId, expiresAt, maxUsers, maxSites, status, serverUrl);
   const verify = generateObfuscatedVerify(licenseId, serverUrl, host, hwidSalt);
   const P = DEPLOY;
 
@@ -469,7 +512,8 @@ fi
   const encodedDeploy = Buffer.from(deployScript, "utf-8").toString("base64");
   const command = `_t=$(mktemp); echo '${encodedDeploy}' | base64 -d > "$_t"; bash "$_t"; _rc=$?; rm -f "$_t"; exit $_rc`;
 
-  return executeSSHCommand(host, port, username, password, command);
+  const result = await executeSSHCommand(host, port, username, password, command);
+  return { ...result, computedHwid: finalHwid !== hardwareId ? finalHwid : undefined };
 }
 
 export function generatePatchDeployPayload(
