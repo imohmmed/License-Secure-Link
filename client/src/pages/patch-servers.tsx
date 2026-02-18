@@ -182,20 +182,20 @@ export default function PatchServers() {
                     <span className="flex items-center gap-1.5 text-muted-foreground">
                       <Hash className="h-3 w-3" /> البورت
                     </span>
-                    <span className="font-mono">22</span>
+                    <span className="font-mono text-foreground">22</span>
                   </div>
                   <div className="flex items-center justify-between gap-2 text-xs">
                     <span className="flex items-center gap-1.5 text-muted-foreground">
                       <User className="h-3 w-3" /> Hostname
                     </span>
-                    <span className="font-mono" data-testid={`text-patch-hostname-${patch.id}`}>{patch.activatedHostname || "—"}</span>
+                    <span className="font-mono text-foreground" data-testid={`text-patch-hostname-${patch.id}`}>{patch.activatedHostname || "—"}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2 text-xs">
                     <span className="flex items-center gap-1.5 text-muted-foreground">
                       <Terminal className="h-3 w-3" /> Hardware ID
                     </span>
-                    <span className="font-mono text-xs truncate max-w-[120px]" data-testid={`text-patch-hwid-${patch.id}`}>
-                      {patch.hardwareId ? patch.hardwareId.substring(0, 10) + "..." : "غير محدد"}
+                    <span className="font-mono text-xs text-foreground" data-testid={`text-patch-hwid-${patch.id}`}>
+                      {patch.hardwareId || "غير محدد"}
                     </span>
                   </div>
                 </div>
@@ -290,7 +290,7 @@ function EditPatchDialog({ patch, onOpenChange, onSubmit, isPending }: {
             <div className="space-y-2 text-xs text-muted-foreground">
               <div className="flex justify-between gap-2"><span>IP:</span><span className="font-mono">{patch.activatedIp || "—"}</span></div>
               <div className="flex justify-between gap-2"><span>Hostname:</span><span className="font-mono">{patch.activatedHostname || "—"}</span></div>
-              <div className="flex justify-between gap-2"><span>HWID:</span><code className="font-mono text-xs px-1.5 py-0.5 rounded bg-muted">{patch.hardwareId ? patch.hardwareId.substring(0, 12) + "..." : "—"}</code></div>
+              <div className="flex justify-between gap-2"><span>HWID:</span><span className="font-mono">{patch.hardwareId || "—"}</span></div>
             </div>
           )}
           <DialogFooter>

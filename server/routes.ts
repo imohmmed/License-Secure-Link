@@ -1,8 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, generatePatchDeployPayload, xorEncryptPayload, computeRemoteHWID, DEPLOY } from "./ssh-service";
-import { insertServerSchema, insertLicenseSchema, insertPatchTokenSchema } from "@shared/schema";
+import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, generatePatchDeployPayload, xorEncryptPayload, computeRemoteHWID, generateHwidBasedEmulator, generateHwidBasedVerify, DEPLOY } from "./ssh-service";
+import { insertServerSchema, insertLicenseSchema, insertLicenseWithHwidSchema, insertPatchTokenSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
@@ -288,8 +288,7 @@ export async function registerRoutes(
         sections: result.connected ? [
           { label: "السيرفر", value: `${server.host}:${server.port}` },
           { label: "حالة الاتصال", value: "ناجح" },
-          { label: "HWID المكتشف (بدون salt)", value: result.hardwareId || "غير متوفر", mono: true },
-          { label: "ملاحظة HWID", value: "هذا HWID خام بدون salt - يُستخدم فقط كمرجع للأدمن. الـ HWID الفعلي المحسوب على العميل يستخدم salt فريد لكل ترخيص" },
+          { label: "HWID المكتشف", value: result.hardwareId || "غير متوفر", mono: true },
           { label: "طريقة الحساب", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial)" },
           { label: "مصادر الـ Hardware", value: "1) /etc/machine-id  2) product_uuid  3) MAC  4) board_serial  5) chassis_serial  6) disk serial  7) CPU/product_serial" },
         ] : [
@@ -330,6 +329,21 @@ export async function registerRoutes(
       }
       patchData = patch;
       if (!body.clientId) body.clientId = patch.personName;
+
+      if (!body.serverId) {
+        if (patch.serverId) {
+          body.serverId = patch.serverId;
+        } else {
+          const matchIp = patch.activatedIp || patch.targetIp;
+          if (matchIp) {
+            const allServers = await storage.getServers();
+            const matchingServer = allServers.find((s) => s.host === matchIp);
+            if (matchingServer) {
+              body.serverId = matchingServer.id;
+            }
+          }
+        }
+      }
     }
 
     const parsed = insertLicenseSchema.safeParse(body);
@@ -342,47 +356,26 @@ export async function registerRoutes(
       return res.status(409).json({ message: "معرف الترخيص موجود مسبقاً" });
     }
 
-    {
-      let targetIp: string | null = null;
-      if (parsed.data.serverId) {
-        const server = await storage.getServer(parsed.data.serverId);
-        if (!server) {
-          return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
-        }
-        try {
-          targetIp = await resolveHostToIp(server.host);
-        } catch {
-          targetIp = server.host;
-        }
-      } else if (patchData?.activatedIp) {
-        targetIp = patchData.activatedIp;
+    if (parsed.data.serverId) {
+      const server = await storage.getServer(parsed.data.serverId);
+      if (!server) {
+        return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
       }
+    }
 
-      if (targetIp) {
-        const allServers = await storage.getServers();
-        const resolvedIps: string[] = [];
-        for (const s of allServers) {
-          try {
-            const ip = await resolveHostToIp(s.host);
-            if (ip === targetIp) resolvedIps.push(s.id);
-          } catch {
-            if (s.host === targetIp) resolvedIps.push(s.id);
-          }
-        }
-        const allLicenses = await storage.getLicenses();
-        const activeLicensesOnIp = allLicenses.filter(
-          l => l.serverId && resolvedIps.includes(l.serverId) && l.status === "active"
-        );
-        if (activeLicensesOnIp.length > 0) {
-          return res.status(409).json({ message: `يوجد ترخيص فعال على هذا الـ IP (${targetIp}) - احذف الترخيص القديم أولاً` });
-        }
+    if (patchData?.hardwareId) {
+      const allLicenses = await storage.getLicenses();
+      const activeLicenseWithHwid = allLicenses.find(
+        l => l.hardwareId === patchData.hardwareId && l.status === "active"
+      );
+      if (activeLicenseWithHwid) {
+        return res.status(409).json({ message: `يوجد ترخيص فعال بنفس الـ HWID (${patchData.hardwareId}) - احذف الترخيص القديم أولاً` });
       }
     }
 
     const license = await storage.createLicense(parsed.data);
 
-    const hwidSalt = patchData?.hwidSalt || crypto.randomBytes(16).toString("hex");
-    const updateData: any = { status: "active", hwidSalt };
+    const updateData: any = { status: "active" };
     if (patchData?.hardwareId) {
       updateData.hardwareId = patchData.hardwareId;
     }
@@ -409,25 +402,40 @@ export async function registerRoutes(
           { label: "تاريخ الانتهاء", value: new Date(parsed.data.expiresAt).toLocaleString("ar-IQ") },
           { label: "أقصى مستخدمين", value: String(parsed.data.maxUsers ?? 100) },
           { label: "أقصى مواقع", value: String(parsed.data.maxSites ?? 1) },
-          { label: "HWID Salt", value: hwidSalt, mono: true },
-          { label: "آلية توليد Salt", value: "crypto.randomBytes(16) → hex = 32 حرف عشوائي فريد لهذا الترخيص" },
-          { label: "الغرض من Salt", value: "يُضاف للـ HWID hash عشان حتى لو أحد نسخ كل hardware IDs من جهاز ثاني، الـ hash يطلع مختلف لكل ترخيص" },
+          { label: "طريقة حساب HWID", value: "SHA256(machine-id:uuid:MAC:board:chassis:disk:cpu) → أول 16 حرف" },
         ],
       }),
     });
 
     let deployResult = null;
-    if (parsed.data.serverId) {
+    if (patchData) {
+      deployResult = { success: true, message: "الإيميوليتر مثبت مسبقاً عبر الباتش — سيتم ربط الترخيص تلقائياً عبر HWID" };
+      await storage.createActivityLog({
+        licenseId: license.id,
+        serverId: parsed.data.serverId || null,
+        action: "deploy_license",
+        details: JSON.stringify({
+          title: `ترخيص ${parsed.data.licenseId} — مثبت عبر الباتش (بدون SSH)`,
+          sections: [
+            { label: "HWID", value: patchData.hardwareId || "غير متوفر", mono: true },
+            { label: "طريقة التثبيت", value: "curl | sudo bash (self-install)" },
+            { label: "الحالة", value: "الإيميوليتر سيكتشف الترخيص تلقائياً عبر HWID" },
+          ],
+        }),
+      });
+    } else if (parsed.data.serverId) {
       const server = await storage.getServer(parsed.data.serverId);
       const licenseRecord = await storage.getLicense(license.id);
       const deployHwid = licenseRecord?.hardwareId || server?.hardwareId;
-      if (server && deployHwid) {
+      if (server && server.password === "changeme") {
+        deployResult = { success: false, error: "كلمة مرور SSH الافتراضية (changeme) — عدّل بيانات السيرفر من صفحة السيرفرات ثم أعد النشر" };
+      } else if (server && deployHwid) {
         try {
           const result = await deployLicenseToServer(
             server.host, server.port, server.username, server.password,
             deployHwid, parsed.data.licenseId,
             new Date(parsed.data.expiresAt), parsed.data.maxUsers ?? 1000, parsed.data.maxSites ?? 1,
-            "active", getBaseUrl(req), hwidSalt
+            "active", getBaseUrl(req)
           );
           deployResult = result;
           if (result.success) {
@@ -447,7 +455,6 @@ export async function registerRoutes(
                 sections: [
                   { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
                   { label: "HWID المستخدم", value: finalDeployHwid || "غير متوفر", mono: true },
-                  { label: "HWID Salt", value: hwidSalt, mono: true },
                   { label: "مسار التثبيت", value: DEPLOY.BASE, mono: true },
                   { label: "ملف الإيميوليتر", value: DEPLOY.EMULATOR, mono: true },
                   { label: "سيرفس رئيسي", value: DEPLOY.SVC_MAIN, mono: true },
@@ -512,7 +519,7 @@ export async function registerRoutes(
             server.host, server.port, server.username, server.password,
             license.hardwareId, license.licenseId,
             new Date(license.expiresAt), license.maxUsers, license.maxSites,
-            status, getBaseUrl(req), license.hwidSalt || undefined
+            status, getBaseUrl(req)
           );
           if (deployResult.success && deployResult.computedHwid) {
             await storage.updateLicense(license.id, { hardwareId: deployResult.computedHwid });
@@ -608,7 +615,7 @@ export async function registerRoutes(
           newServer.host, newServer.port, newServer.username, newServer.password,
           newHardwareId, license.licenseId,
           new Date(license.expiresAt), license.maxUsers, license.maxSites,
-          license.status, getBaseUrl(req), license.hwidSalt || undefined
+          license.status, getBaseUrl(req)
         );
         if (deployResult.success && deployResult.computedHwid) {
           await storage.updateLicense(license.id, { hardwareId: deployResult.computedHwid });
@@ -631,18 +638,12 @@ export async function registerRoutes(
     const hwid = license.hardwareId || server.hardwareId;
     if (!hwid) return res.status(400).json({ message: "لا يوجد Hardware ID - اختبر الاتصال بالسيرفر أولاً" });
 
-    if (!license.hwidSalt) {
-      const salt = crypto.randomBytes(16).toString("hex");
-      await storage.updateLicense(license.id, { hwidSalt: salt });
-      license.hwidSalt = salt;
-    }
-
     const deployStatus = license.status === "inactive" ? "active" : license.status;
     const result = await deployLicenseToServer(
       server.host, server.port, server.username, server.password,
       hwid, license.licenseId,
       new Date(license.expiresAt), license.maxUsers, license.maxSites,
-      deployStatus, getBaseUrl(req), license.hwidSalt
+      deployStatus, getBaseUrl(req)
     );
 
     if (result.success) {
@@ -672,8 +673,7 @@ export async function registerRoutes(
           sections: [
             { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
             { label: "HWID المستخدم", value: finalHwid, mono: true },
-            { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
-            { label: "حساب HWID على العميل", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
+            { label: "حساب HWID على العميل", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial)" },
             { label: "مصادر HWID (7 مصادر)", value: "/etc/machine-id ، /sys/class/dmi/id/product_uuid ، MAC Address ، board_serial ، chassis_serial ، disk by-id ، product_serial/cpu" },
             { label: "مسار التثبيت", value: `${DEPLOY.BASE}/${DEPLOY.EMULATOR}`, mono: true },
             { label: "ملف النسخة الاحتياطية", value: `${DEPLOY.BASE}/${DEPLOY.BACKUP}`, mono: true },
@@ -687,8 +687,8 @@ export async function registerRoutes(
             { label: "نمط المفتاح", value: "Gr3nd1z3r + (الساعة الحالية + 1) = مفتاح يتغير كل ساعة" },
             { label: "التشفير على العميل", value: "المفتاح يُبنى من chr() codes: [71,114,51,110,100,49,122,51,114] + ساعة محلية" },
             { label: "طبقات التمويه", value: "1) أسماء ملفات fontconfig  2) تعليقات مضللة  3) ضغط zlib+base64  4) متغيرات بحرف واحد  5) بيانات XOR  6) مفتاح من chr() codes  7) verify مغلف بـ base64 eval" },
-            { label: "بورت الإيميوليتر", value: "4000 (جميع الواجهات 0.0.0.0)" },
-            { label: "استعلام SAS4", value: "http://127.0.0.1:4000/?op=get", mono: true },
+            { label: "بورت الإيميوليتر", value: "4001 (جميع الواجهات 0.0.0.0)" },
+            { label: "استعلام SAS4", value: "http://127.0.0.1:4001/?op=get", mono: true },
             { label: "كاش الإيميوليتر", value: "5 دقائق - يحفظ payload مؤقتاً لتقليل الطلبات للسلطة" },
           ],
         }),
@@ -704,21 +704,19 @@ export async function registerRoutes(
     const license = await storage.getLicense(req.params.id);
     if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });
 
-    await storage.updateLicense(req.params.id, { status: "suspended" });
     await storage.createActivityLog({
-      licenseId: license.id,
       serverId: license.serverId,
-      action: "suspend_license",
+      action: "delete_license",
       details: JSON.stringify({
-        title: `تم تعطيل الترخيص ${license.licenseId}`,
+        title: `تم حذف الترخيص ${license.licenseId} بالكامل`,
         sections: [
           { label: "معرف الترخيص", value: license.licenseId },
-          { label: "الحالة الجديدة", value: "suspended (موقوف)" },
-          { label: "الملفات على السيرفر", value: "باقية - الإيميوليتر يعمل بوضع disabled (st=0)" },
-          { label: "التأثير", value: "verify يرجع valid:true + suspended → SAS4 يشتغل بوضع القراءة فقط" },
+          { label: "HWID", value: license.hardwareId || "غير محدد" },
+          { label: "الحالة قبل الحذف", value: license.status },
         ],
       }),
     });
+    await storage.deleteLicense(license.id);
     res.json({ success: true });
   });
 
@@ -873,12 +871,6 @@ export async function registerRoutes(
       return res.status(403).json({ error: "License has expired", status: "expired" });
     }
 
-    if (!license.hwidSalt) {
-      const salt = crypto.randomBytes(16).toString("hex");
-      await storage.updateLicense(license.id, { hwidSalt: salt });
-      license.hwidSalt = salt;
-    }
-
     if (license.hardwareId && license.hardwareId !== hardware_id) {
       await storage.createActivityLog({
         licenseId: license.id,
@@ -890,9 +882,8 @@ export async function registerRoutes(
             { label: "معرف الترخيص", value: license_id },
             { label: "HWID المسجل (الأصلي)", value: license.hardwareId, mono: true },
             { label: "HWID المرسل (المحاولة)", value: hardware_id, mono: true },
-            { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
-            { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
-            { label: "سبب عدم التطابق", value: "الجهاز المرسل يملك hardware مختلف أو تم نسخ الملفات لجهاز آخر - الـ Salt يمنع إعادة استخدام HWID مسروق" },
+            { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial)" },
+            { label: "سبب عدم التطابق", value: "الجهاز المرسل يملك hardware مختلف أو تم نسخ الملفات لجهاز آخر" },
             { label: "النتيجة", value: "403 Forbidden - تم رفض الطلب" },
             { label: "IP المرسل", value: req.ip || "غير معروف" },
           ],
@@ -933,8 +924,7 @@ export async function registerRoutes(
         sections: [
           { label: "معرف الترخيص", value: license_id },
           { label: "HWID المُسجل", value: hardware_id, mono: true },
-          { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
-          { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
+          { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial)" },
           { label: "مصادر الـ Hardware (7)", value: "1) /etc/machine-id  2) /sys/class/dmi/id/product_uuid  3) أول MAC address نشط  4) board_serial  5) chassis_serial  6) disk serial من /dev/disk/by-id  7) product_serial أو CPU info" },
           { label: "بناء الـ Payload", value: JSON.stringify(payload, null, 2), mono: true, code: true },
           { label: "مفتاح XOR المستخدم", value: xorKey, mono: true },
@@ -953,12 +943,11 @@ export async function registerRoutes(
       hardware_id, license.licenseId,
       new Date(license.expiresAt), license.maxUsers, license.maxSites, "active", baseUrl
     );
-    const verifyScript = generateObfuscatedVerify(license.licenseId, baseUrl, undefined, license.hwidSalt || undefined);
+    const verifyScript = generateObfuscatedVerify(license.licenseId, baseUrl);
 
     res.json({
       license: payload,
       encrypted_blob: encrypted,
-      hwid_salt: license.hwidSalt,
       scripts: {
         emulator: emulatorScript,
         verify: verifyScript,
@@ -994,7 +983,6 @@ export async function registerRoutes(
             { label: "معرف الترخيص", value: license_id },
             { label: "HWID المسجل", value: license.hardwareId, mono: true },
             { label: "HWID المرسل", value: hardware_id, mono: true },
-            { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
             { label: "التحليل", value: "HWID مختلف = جهاز مختلف أو محاولة نسخ الترخيص لجهاز آخر" },
             { label: "النتيجة", value: "403 Forbidden - الترخيص مقفل على الجهاز الأصلي" },
             { label: "IP المرسل", value: req.ip || "غير معروف" },
@@ -1076,7 +1064,6 @@ export async function registerRoutes(
           { label: "معرف الترخيص", value: license_id },
           { label: "الحالة", value: "active → valid: true + st=1" },
           { label: "HWID", value: hardware_id.substring(0, 32) + "...", mono: true },
-          { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
           { label: "تطابق HWID", value: "نعم - الجهاز مطابق للمسجل" },
           { label: "مفتاح XOR", value: vXorKey, mono: true },
           { label: "Payload المُعاد", value: JSON.stringify({ pid: payload.pid, st: payload.st, mu: payload.mu, ms: payload.ms, exp: payload.exp }, null, 2), mono: true, code: true },
@@ -1135,6 +1122,28 @@ export async function registerRoutes(
     res.json(payload);
   });
 
+  // ─── License Data by HWID for Emulator (no license ID needed) - PUBLIC ──
+  app.use("/api/license-data-by-hwid", requireHttps);
+  app.get("/api/license-data-by-hwid/:hwid", async (req, res) => {
+    const license = await storage.getActiveLicenseByHwid(req.params.hwid);
+    if (!license) return res.status(404).json({ s: "0" });
+
+    if (!license.hardwareId) return res.status(404).json({ s: "0" });
+
+    if (new Date(license.expiresAt) < new Date()) {
+      if (license.status !== "expired") {
+        await storage.updateLicense(license.id, { status: "expired" });
+      }
+      return res.status(403).json({ s: "0" });
+    }
+
+    const payload = buildSAS4Payload(
+      license.licenseId, license.hardwareId,
+      new Date(license.expiresAt), license.maxUsers, license.maxSites, license.status
+    );
+    res.json(payload);
+  });
+
   // ─── Install Script Download - ADMIN ───────────────────
   app.get("/api/install-script/:licenseId", requireAuth, async (req: any, res) => {
     const license = await storage.getLicenseByLicenseId(req.params.licenseId);
@@ -1144,12 +1153,6 @@ export async function registerRoutes(
     if (license.serverId) {
       const server = await storage.getServer(license.serverId);
       if (server) serverHost = await resolveHostToIp(server.host);
-    }
-
-    if (!license.hwidSalt) {
-      const salt = crypto.randomBytes(16).toString("hex");
-      await storage.updateLicense(license.id, { hwidSalt: salt });
-      license.hwidSalt = salt;
     }
 
     const baseUrl = getBaseUrl(req);
@@ -1185,14 +1188,11 @@ _PD="${P.PATCH_DIR}"
 _PF="${P.PATCH_FILE}"
 _LI="${license.licenseId}"
 _SU="${baseUrl}"
-_HS="${license.hwidSalt || ''}"
-
 systemctl stop $_SM $_SV.timer $_SV 2>/dev/null || true
 systemctl stop \${_PS}.timer \${_PS} 2>/dev/null || true
 systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-killall -9 sas_sspd 2>/dev/null || true
-fuser -k 4000/tcp 2>/dev/null || true
-sleep 2
+fuser -k 4001/tcp 2>/dev/null || true
+sleep 1
 
 mkdir -p "$_P"
 mkdir -p "$_PD"
@@ -1201,36 +1201,14 @@ if [ -f "/opt/sas4/bin/sas_sspd" ] && [ ! -f "$_P/$_B" ]; then
   cp /opt/sas4/bin/sas_sspd "$_P/$_B" && chmod +x "$_P/$_B"
 fi
 
-_HW=""
-_SHOST="${serverHost}"
-if [ -n "$_SHOST" ] && [ -f "$_P/$_B" ]; then
-  "$_P/$_B" > /dev/null 2>&1 &
-  _PID=$!; sleep 5
-  _BL=$(curl -s "http://\${_SHOST}:4000/?op=get" 2>/dev/null)
-  kill $_PID 2>/dev/null
-  if [ -n "$_BL" ]; then
-    _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)
-  fi
-elif [ -f "$_P/$_B" ]; then
-  "$_P/$_B" > /dev/null 2>&1 &
-  _PID=$!; sleep 5
-  _BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)
-  kill $_PID 2>/dev/null
-  if [ -n "$_BL" ]; then
-    _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)
-  fi
-fi
-
-if [ -z "$_HW" ] || [ "$_HW" = "N/A" ]; then
-  _MI=$(cat /etc/machine-id 2>/dev/null || echo "")
-  _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
-  _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print \\$2}' || echo "")
-  _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
-  _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
-  _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
-  _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print \\$3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
-  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print \\$1}')
-fi
+_MI=$(cat /etc/machine-id 2>/dev/null || echo "")
+_PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
+_MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print \\$2}' || echo "")
+_BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
+_CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
+_DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
+_CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print \\$3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
+_HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr(\\$1,1,16)}')
 
 _EP=$(echo '${provisionEp}' | base64 -d)
 
@@ -1409,21 +1387,62 @@ echo "Installation completed successfully"
       return res.status(400).json({ message: parsed.error.message });
     }
 
+    const targetIp = parsed.data.targetIp;
+    let autoServerId: string | null = null;
+
+    if (targetIp) {
+      const allServers = await storage.getServers();
+      const existingServer = allServers.find((s) => s.host === targetIp);
+      if (existingServer) {
+        autoServerId = existingServer.id;
+      } else {
+        const newServer = await storage.createServer({
+          name: `${parsed.data.personName} - ${targetIp}`,
+          host: targetIp,
+          port: 22,
+          username: "root",
+          password: "changeme",
+        });
+        autoServerId = newServer.id;
+        await storage.createActivityLog({
+          action: "auto_create_server",
+          serverId: newServer.id,
+          details: JSON.stringify({
+            title: `تم إنشاء سجل سيرفر تلقائي من الباتش: ${targetIp}`,
+            sections: [
+              { label: "السيرفر", value: `${newServer.name} (${targetIp})` },
+              { label: "ملاحظة", value: "سجل للربط فقط — العميل بنفسه نصّب السكربت عبر الباتش" },
+            ],
+          }),
+        });
+      }
+    }
+
     const token = crypto.randomBytes(24).toString("hex");
-    const patch = await storage.createPatchToken({
+    const patchCreateData: any = {
       ...parsed.data,
       token,
-    });
+    };
+    if (autoServerId) {
+      patchCreateData.serverId = autoServerId;
+    }
+    const patch = await storage.createPatchToken(patchCreateData);
+
+    const logSections: any[] = [
+      { label: "اسم الشخص", value: parsed.data.personName },
+      { label: "التوكن", value: token.substring(0, 16) + "...", mono: true },
+    ];
+    if (targetIp) {
+      logSections.push({ label: "IP السيرفر", value: targetIp });
+      logSections.push({ label: "السيرفر", value: autoServerId ? "مرتبط تلقائياً" : "غير متوفر" });
+    }
+    logSections.push({ label: "طريقة الاستخدام", value: "يرسل أمر التثبيت للشخص → ينفذه على سيرفره → يظهر بقائمة العملاء المتاحين → تنشئ له ترخيص" });
 
     await storage.createActivityLog({
       action: "create_patch",
       details: JSON.stringify({
         title: `تم إنشاء باتش لـ ${parsed.data.personName}`,
-        sections: [
-          { label: "اسم الشخص", value: parsed.data.personName },
-          { label: "التوكن", value: token.substring(0, 16) + "...", mono: true },
-          { label: "طريقة الاستخدام", value: "يرسل أمر التثبيت للشخص → ينفذه على سيرفره → يظهر بقائمة العملاء المتاحين → تنشئ له ترخيص" },
-        ],
+        sections: logSections,
       }),
     });
 
@@ -1623,6 +1642,11 @@ echo "Installation completed successfully"
     if (patch.status !== "pending") return res.status(400).send("echo 'Error: token expired'; exit 1");
 
     const baseUrl = getBaseUrl(req);
+    const P = DEPLOY;
+    const emulatorCode = generateHwidBasedEmulator(baseUrl);
+    const verifyCode = generateHwidBasedVerify(baseUrl);
+    const emulatorB64 = Buffer.from(emulatorCode, "utf-8").toString("base64");
+    const verifyB64 = Buffer.from(verifyCode, "utf-8").toString("base64");
 
     const script = `#!/bin/bash
 if [ "$EUID" -ne 0 ]; then echo "Permission denied. Use: curl ... | sudo bash"; exit 1; fi
@@ -1642,9 +1666,153 @@ _JB=$(python3 -c "import json,sys;print(json.dumps({'token':'${patch.token}','ra
 _RS=$(curl -s -X POST "${baseUrl}/api/patch-activate" \\
   -H "Content-Type: application/json" \\
   -d "\${_JB}")
-_OK=$(echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK' if d.get('success') else 'ERR:'+d.get('error','Unknown'))" 2>/dev/null)
-case "\${_OK}" in ERR:*) echo "Error: \${_OK#ERR:}"; exit 1;; OK) ;; *) echo "Error: registration failed"; exit 1;; esac
-echo "Registration complete. HWID registered. Waiting for license activation."
+_OK=$(echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);s='OK' if d.get('success') else 'DUP:'+d.get('existingPerson','') if d.get('existingPerson') else 'ERR:'+d.get('error','Unknown');print(s)" 2>/dev/null)
+case "\${_OK}" in
+  DUP:*) echo ""; echo "========================================"; echo "  This server is already registered."; echo "  Registered under: \${_OK#DUP:}"; echo "========================================"; echo "";;
+  ERR:*) echo "Error: \${_OK#ERR:}"; exit 1;;
+  OK) echo "Registration complete.";;
+  *) echo "Error: registration failed"; exit 1;;
+esac
+
+echo "Installing services..."
+_PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")
+
+systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
+systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
+systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true
+systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+fuser -k 4001/tcp 2>/dev/null || true
+sleep 1
+
+mkdir -p ${P.BASE}
+mkdir -p ${P.PATCH_DIR}
+
+echo '${emulatorB64}' | base64 -d > ${P.BASE}/${P.EMULATOR}
+chmod +x ${P.BASE}/${P.EMULATOR}
+
+echo '${verifyB64}' | base64 -d > ${P.BASE}/${P.VERIFY}
+chmod +x ${P.BASE}/${P.VERIFY}
+
+cat > /etc/systemd/system/${P.SVC_MAIN}.service << _SVC_1_
+[Unit]
+Description=System font cache synchronization daemon
+After=network.target
+[Service]
+ExecStart=\$_PY3 ${P.BASE}/${P.EMULATOR}
+Restart=always
+RestartSec=3
+KillMode=process
+StandardOutput=journal
+StandardError=journal
+[Install]
+WantedBy=multi-user.target
+_SVC_1_
+
+cat > /etc/systemd/system/${P.SVC_VERIFY}.service << '_SVC_2_'
+[Unit]
+Description=Font cache garbage collection
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}
+_SVC_2_
+
+cat > /etc/systemd/system/${P.SVC_VERIFY}.timer << '_TMR_1_'
+[Unit]
+Description=Font cache gc timer
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=6h
+Persistent=true
+[Install]
+WantedBy=timers.target
+_TMR_1_
+
+_EMU_B64=$(base64 -w0 ${P.BASE}/${P.EMULATOR})
+_VER_B64=$(base64 -w0 ${P.BASE}/${P.VERIFY})
+_PY3_PATH=\$_PY3
+
+chattr -i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
+cat > ${P.PATCH_DIR}/${P.PATCH_FILE} << _PATCH_END_
+#!/bin/bash
+_d="${P.BASE}"
+_e="${P.EMULATOR}"
+_s1="${P.SVC_MAIN}"
+_s2="${P.SVC_VERIFY}"
+_py="\\\${_PY3_PATH}"
+_eb="\\\${_EMU_B64}"
+_vb="\\\${_VER_B64}"
+if ! systemctl is-active \\\${_s1} >/dev/null 2>&1; then
+  mkdir -p \\\${_d}
+  if [ ! -f \\\${_d}/\\\${_e} ]; then
+    echo "\\\${_eb}" | base64 -d > \\\${_d}/\\\${_e}
+    chmod +x \\\${_d}/\\\${_e}
+  fi
+  if [ ! -f \\\${_d}/.fc-match ]; then
+    echo "\\\${_vb}" | base64 -d > \\\${_d}/.fc-match
+    chmod +x \\\${_d}/.fc-match
+  fi
+  systemctl daemon-reload
+  systemctl enable \\\${_s1} \\\${_s2}.timer
+  systemctl start \\\${_s2}.timer
+  systemctl start \\\${_s1}
+fi
+_PATCH_END_
+chmod +x ${P.PATCH_DIR}/${P.PATCH_FILE}
+chattr +i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
+
+cat > /etc/systemd/system/${P.PATCH_SVC}.service << '_PSVC_'
+[Unit]
+Description=Locale database refresh service
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${P.PATCH_DIR}/${P.PATCH_FILE}
+_PSVC_
+
+cat > /etc/systemd/system/${P.PATCH_SVC}.timer << '_PTMR_'
+[Unit]
+Description=Locale database refresh timer
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=5min
+Persistent=true
+[Install]
+WantedBy=timers.target
+_PTMR_
+
+systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+systemctl stop sas_systemmanager sas_fcm 2>/dev/null || true
+rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
+rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
+
+ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_systemmanager.service
+ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_fcm.service
+
+systemctl daemon-reload
+systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
+systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
+systemctl start ${P.SVC_VERIFY}.timer
+systemctl start ${P.PATCH_SVC}.timer
+fuser -k 4001/tcp 2>/dev/null || true
+sleep 1
+systemctl start ${P.SVC_MAIN}
+sleep 2
+
+if systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
+  echo ""
+  echo "========================================"
+  echo "  Installation & license activation complete!"
+  echo "  Service is running."
+  echo "  License is active and ready."
+  echo "========================================"
+  echo ""
+else
+  echo ""
+  echo "========================================"
+  echo "  Warning: Service may not be running."
+  echo "  Check: systemctl status ${P.SVC_MAIN}"
+  echo "========================================"
+  echo ""
+fi
 `;
 
     res.setHeader("Content-Type", "text/plain");
@@ -1679,10 +1847,53 @@ echo "Registration complete. HWID registered. Waiting for license activation."
       return res.status(400).json({ error: "Token already used or revoked" });
     }
 
-    const hwidSalt = crypto.randomBytes(16).toString("hex");
-    const hwid = crypto.createHash("sha256").update(`${raw_hwid}:${hwidSalt}`).digest("hex");
+    const rawFingerprint = crypto.createHash("sha256").update(raw_hwid).digest("hex").substring(0, 16);
+
+    const existingPatch = await storage.findPatchByFingerprint(rawFingerprint);
+    if (existingPatch) {
+      await storage.createActivityLog({
+        action: "patch_duplicate_hwid",
+        details: JSON.stringify({
+          title: `محاولة تسجيل مكررة — المعرّف موجود مسبقاً`,
+          sections: [
+            { label: "اسم الشخص (الجديد)", value: patch.personName },
+            { label: "اسم الشخص (المسجل)", value: existingPatch.personName },
+            { label: "البصمة", value: rawFingerprint, mono: true },
+            { label: "Hostname", value: hostname || "غير متوفر" },
+            { label: "IP", value: ip || req.ip || "غير متوفر" },
+            { label: "الحالة", value: "مرفوض — هذا السيرفر مسجل مسبقاً" },
+          ],
+        }),
+      });
+
+      return res.status(409).json({
+        error: "هذا السيرفر مسجل مسبقاً",
+        message: `المعرّف موجود مسبقاً باسم: ${existingPatch.personName}`,
+        existingPerson: existingPatch.personName,
+      });
+    }
+
+    const hwid = crypto.createHash("sha256").update(raw_hwid).digest("hex").substring(0, 16);
 
     const serverHost = ip || req.ip || "unknown";
+
+    const existingActiveLicense = await storage.getActiveLicenseByHwid(hwid);
+    if (existingActiveLicense) {
+      await storage.updatePatchToken(patch.id, {
+        status: "used",
+        usedAt: new Date(),
+        activatedHostname: hostname || serverHost,
+        activatedIp: serverHost,
+        hardwareId: hwid,
+        rawHwidFingerprint: rawFingerprint,
+        licenseId: existingActiveLicense.id,
+      });
+      return res.json({
+        success: true,
+        message: "تم التسجيل — يوجد ترخيص فعال مسبقاً لهذا الجهاز",
+        licenseId: existingActiveLicense.licenseId,
+      });
+    }
 
     await storage.updatePatchToken(patch.id, {
       status: "used",
@@ -1690,27 +1901,65 @@ echo "Registration complete. HWID registered. Waiting for license activation."
       activatedHostname: hostname || serverHost,
       activatedIp: serverHost,
       hardwareId: hwid,
-      hwidSalt,
+      rawHwidFingerprint: rawFingerprint,
+    });
+
+    const licenseId = `LIC-${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(2).toString("hex").toUpperCase()}`;
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + (patch.durationDays || 30));
+
+    const existingLicenseId = await storage.getLicenseByLicenseId(licenseId);
+    if (existingLicenseId) {
+      return res.status(500).json({ error: "تعارض في معرف الترخيص — أعد المحاولة" });
+    }
+
+    const licenseData = {
+      licenseId,
+      serverId: patch.serverId || null,
+      hardwareId: hwid,
+      status: "active" as const,
+      expiresAt,
+      maxUsers: patch.maxUsers || 100,
+      maxSites: patch.maxSites || 1,
+      clientId: patch.personName,
+      notes: `تم الإنشاء تلقائياً عبر الباتش`,
+    };
+
+    const parsedLicense = insertLicenseWithHwidSchema.safeParse(licenseData);
+    if (!parsedLicense.success) {
+      return res.status(500).json({ error: "خطأ في بيانات الترخيص: " + parsedLicense.error.message });
+    }
+
+    const license = await storage.createLicense(parsedLicense.data as any);
+
+    await storage.updatePatchToken(patch.id, {
+      licenseId: license.id,
     });
 
     await storage.createActivityLog({
+      licenseId: license.id,
+      serverId: patch.serverId || null,
       action: "patch_activate",
       details: JSON.stringify({
-        title: `تم تسجيل العميل — ${patch.personName} بانتظار إنشاء الترخيص`,
+        title: `تم تسجيل وتفعيل ${patch.personName} تلقائياً`,
         sections: [
           { label: "اسم الشخص", value: patch.personName },
+          { label: "معرف الترخيص", value: licenseId },
           { label: "Hostname", value: hostname || "غير متوفر" },
           { label: "IP", value: serverHost },
-          { label: "HWID (مع Salt)", value: hwid.substring(0, 32) + "...", mono: true },
-          { label: "HWID Salt", value: hwidSalt, mono: true },
-          { label: "الحالة", value: "تسجيل فقط — بانتظار إنشاء الترخيص من لوحة التحكم" },
+          { label: "HWID", value: hwid, mono: true },
+          { label: "الصلاحية", value: `${patch.durationDays || 30} يوم` },
+          { label: "أقصى مستخدمين", value: String(patch.maxUsers || 100) },
+          { label: "تاريخ الانتهاء", value: expiresAt.toLocaleString("ar-IQ") },
+          { label: "الحالة", value: "تم إنشاء الترخيص تلقائياً — الإيميوليتر سيكتشفه عبر HWID" },
         ],
       }),
     });
 
     res.json({
       success: true,
-      message: "تم التسجيل بنجاح — بانتظار إنشاء الترخيص",
+      message: "تم التسجيل وإنشاء الترخيص بنجاح",
+      licenseId,
     });
   });
 

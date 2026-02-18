@@ -28,6 +28,7 @@ export interface IStorage {
   getLicenses(): Promise<License[]>;
   getLicense(id: string): Promise<License | undefined>;
   getLicenseByLicenseId(licenseId: string): Promise<License | undefined>;
+  getActiveLicenseByHwid(hwid: string): Promise<License | undefined>;
   getLicensesByServerId(serverId: string): Promise<License[]>;
   createLicense(data: InsertLicense): Promise<License>;
   updateLicense(id: string, data: Partial<License>): Promise<License | undefined>;
@@ -39,6 +40,7 @@ export interface IStorage {
   getPatchTokens(): Promise<PatchToken[]>;
   getPatchToken(id: string): Promise<PatchToken | undefined>;
   getPatchTokenByToken(token: string): Promise<PatchToken | undefined>;
+  findPatchByFingerprint(fingerprint: string): Promise<PatchToken | undefined>;
   createPatchToken(data: InsertPatchToken & { token: string }): Promise<PatchToken>;
   updatePatchToken(id: string, data: Partial<PatchToken>): Promise<PatchToken | undefined>;
   deletePatchToken(id: string): Promise<void>;
@@ -90,6 +92,14 @@ export class DatabaseStorage implements IStorage {
     return license;
   }
 
+  async getActiveLicenseByHwid(hwid: string): Promise<License | undefined> {
+    const all = await db.select().from(licenses).where(eq(licenses.hardwareId, hwid));
+    const active = all.filter(l => l.status === "active" && new Date(l.expiresAt) > new Date());
+    if (active.length === 0) return undefined;
+    active.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return active[0];
+  }
+
   async getLicensesByServerId(serverId: string): Promise<License[]> {
     return db.select().from(licenses).where(eq(licenses.serverId, serverId));
   }
@@ -129,6 +139,11 @@ export class DatabaseStorage implements IStorage {
 
   async getPatchTokenByToken(token: string): Promise<PatchToken | undefined> {
     const [pt] = await db.select().from(patchTokens).where(eq(patchTokens.token, token));
+    return pt;
+  }
+
+  async findPatchByFingerprint(fingerprint: string): Promise<PatchToken | undefined> {
+    const [pt] = await db.select().from(patchTokens).where(eq(patchTokens.rawHwidFingerprint, fingerprint));
     return pt;
   }
 

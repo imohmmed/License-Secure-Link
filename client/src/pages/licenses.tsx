@@ -50,6 +50,7 @@ import {
   Edit,
   Clock,
   Download,
+  Trash2,
 } from "lucide-react";
 import type { License, Server as ServerType, PatchToken } from "@shared/schema";
 
@@ -75,14 +76,21 @@ export default function Licenses() {
 
   const { data: licenses, isLoading } = useQuery<License[]>({
     queryKey: ["/api/licenses"],
+    refetchOnMount: "always",
+    refetchInterval: 30000,
+    staleTime: 0,
   });
 
   const { data: serversList } = useQuery<ServerType[]>({
     queryKey: ["/api/servers"],
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 
   const { data: availableClients } = useQuery<PatchToken[]>({
     queryKey: ["/api/patches/available"],
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 
   const createMutation = useMutation({
@@ -163,7 +171,7 @@ export default function Licenses() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity-logs"] });
-      toast({ title: "تم تعطيل الترخيص" });
+      toast({ title: "تم حذف الترخيص بالكامل" });
     },
     onError: (err: Error) => {
       toast({ title: "خطأ", description: err.message, variant: "destructive" });
@@ -276,7 +284,7 @@ export default function Licenses() {
                       <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
                         <span className="flex items-center gap-1">
                           <Shield className="h-3 w-3" />
-                          {license.hardwareId ? license.hardwareId.substring(0, 10) + "..." : "غير مقفل"}
+                          {license.hardwareId || "غير مقفل"}
                         </span>
                         <span className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" />
@@ -366,6 +374,19 @@ export default function Licenses() {
                           <Download className="h-4 w-4 ml-2" />
                           تنزيل install.sh
                         </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => {
+                            if (window.confirm(`هل أنت متأكد من حذف الترخيص ${license.licenseId} بالكامل؟ لا يمكن التراجع عن هذا الإجراء.`)) {
+                              deleteMutation.mutate(license.id);
+                            }
+                          }}
+                          data-testid={`action-delete-${license.id}`}
+                        >
+                          <Trash2 className="h-4 w-4 ml-2" />
+                          حذف بالكامل
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -454,10 +475,19 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
     setSelectedPatchId(patchId);
     const patch = availableClients.find((p) => p.id === patchId);
     if (patch) {
+      let matchedServerId = "";
+      if (patch.serverId) {
+        matchedServerId = patch.serverId;
+      } else {
+        const matchIp = patch.activatedIp || patch.targetIp;
+        const matchingServer = matchIp ? servers.find((s) => s.host === matchIp) : undefined;
+        if (matchingServer) matchedServerId = matchingServer.id;
+      }
       setForm((prev) => ({
         ...prev,
         clientId: patch.personName,
         licenseId: prev.licenseId || `LIC-${Date.now().toString(36).toUpperCase()}`,
+        serverId: matchedServerId || prev.serverId,
       }));
     }
   };
@@ -517,7 +547,7 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
             />
           </div>
           <div className="space-y-2">
-            <Label>السيرفر {selectedPatchId ? "(اختر السيرفر للنشر عليه)" : ""}</Label>
+            <Label>السيرفر (اختياري)</Label>
             <Select value={form.serverId} onValueChange={(v) => setForm({ ...form, serverId: v })}>
               <SelectTrigger data-testid="select-server">
                 <SelectValue placeholder="اختر سيرفر..." />
@@ -528,6 +558,16 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
                 ))}
               </SelectContent>
             </Select>
+            {selectedPatchId && (
+              <p className="text-xs text-muted-foreground">
+                العميل جاي من باتش — الإيميوليتر مُثبت مسبقاً، لا حاجة لـ SSH
+              </p>
+            )}
+            {!selectedPatchId && form.serverId && (
+              <p className="text-xs text-muted-foreground">
+                سيتم نشر الإيميوليتر تلقائياً على السيرفر المختار عبر SSH
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -631,9 +671,9 @@ function LicenseDetailsDialog({ license, onClose, servers, onEdit }: {
               label="معرف الهاردوير"
               value={
                 <div className="flex items-center gap-2 min-w-0">
-                  <code className="font-mono text-xs px-2 py-1 rounded bg-muted">{live.hardwareId ? live.hardwareId.substring(0, 12) + "..." : "غير محدد"}</code>
+                  <span className="font-mono text-xs break-all min-w-0">{live.hardwareId || "غير محدد"}</span>
                   {live.hardwareId && (
-                    <Button size="icon" variant="ghost" onClick={copyHwid} className="flex-shrink-0" data-testid="button-copy-hwid">
+                    <Button size="icon" variant="ghost" onClick={copyHwid} className="flex-shrink-0">
                       {copied ? <CheckCircle className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
                     </Button>
                   )}

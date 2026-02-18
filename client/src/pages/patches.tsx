@@ -31,11 +31,13 @@ import {
   Terminal,
   Trash2,
   User,
+  Users,
   Globe,
   Clock,
   CheckCircle,
   Copy,
   Key,
+  Shield,
 } from "lucide-react";
 import type { PatchToken } from "@shared/schema";
 
@@ -57,6 +59,9 @@ export default function Patches() {
 
   const { data: patches, isLoading } = useQuery<PatchToken[]>({
     queryKey: ["/api/patches"],
+    refetchOnMount: "always",
+    refetchInterval: 30000,
+    staleTime: 0,
   });
 
   const createMutation = useMutation({
@@ -148,11 +153,19 @@ export default function Patches() {
                       <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
                         <span className="flex items-center gap-1">
                           <Clock className="h-3 w-3" />
-                          {new Date(patch.createdAt).toLocaleDateString("ar-IQ")}
+                          {patch.durationDays || 30} يوم
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Users className="h-3 w-3" />
+                          {patch.maxUsers || 100} مستخدم
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Globe className="h-3 w-3" />
+                          {patch.maxSites || 1} موقع
                         </span>
                         {patch.status === "used" && patch.activatedHostname && (
                           <span className="flex items-center gap-1">
-                            <Globe className="h-3 w-3" />
+                            <Shield className="h-3 w-3" />
                             {patch.activatedHostname}
                           </span>
                         )}
@@ -161,9 +174,6 @@ export default function Patches() {
                             <CheckCircle className="h-3 w-3 text-emerald-500" />
                             فُعّل {new Date(patch.usedAt).toLocaleDateString("ar-IQ")}
                           </span>
-                        )}
-                        {patch.status === "used" && !patch.licenseId && (
-                          <Badge variant="outline" className="bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate text-[10px]">بانتظار الترخيص</Badge>
                         )}
                         {patch.status === "used" && patch.licenseId && (
                           <Badge variant="outline" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 no-default-hover-elevate no-default-active-elevate text-[10px]">مُرخّص</Badge>
@@ -265,6 +275,10 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
 }) {
   const [form, setForm] = useState({
     personName: "",
+    targetIp: "",
+    maxUsers: "1000",
+    maxSites: "1",
+    durationDays: "30",
     notes: "",
   });
 
@@ -272,6 +286,10 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
     e.preventDefault();
     onSubmit({
       personName: form.personName,
+      targetIp: form.targetIp || null,
+      maxUsers: parseInt(form.maxUsers) || 1000,
+      maxSites: parseInt(form.maxSites) || 1,
+      durationDays: parseInt(form.durationDays) || 30,
       notes: form.notes || null,
     });
   };
@@ -281,7 +299,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
       <DialogContent className="max-w-lg" dir="rtl">
         <DialogHeader>
           <DialogTitle>إنشاء باتش جديد</DialogTitle>
-          <DialogDescription>أضف اسم الشخص وأرسله أمر التثبيت — بعد التثبيت يظهر تلقائياً بقائمة العملاء المتاحين لإنشاء ترخيص</DialogDescription>
+          <DialogDescription>أدخل بيانات الشخص ومعلومات الترخيص — عند تشغيل الباتش يُنشأ الترخيص تلقائياً</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -294,6 +312,52 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
               data-testid="input-person-name"
             />
           </div>
+          <div className="space-y-2">
+            <Label>IP السيرفر (اختياري)</Label>
+            <Input
+              value={form.targetIp}
+              onChange={(e) => setForm({ ...form, targetIp: e.target.value })}
+              placeholder="مثال: 103.113.71.180"
+              dir="ltr"
+              data-testid="input-target-ip"
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-2">
+              <Label>المدة (أيام)</Label>
+              <Input
+                type="number"
+                value={form.durationDays}
+                onChange={(e) => setForm({ ...form, durationDays: e.target.value })}
+                min="1"
+                required
+                data-testid="input-duration-days"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>أقصى مستخدمين</Label>
+              <Input
+                type="number"
+                value={form.maxUsers}
+                onChange={(e) => setForm({ ...form, maxUsers: e.target.value })}
+                min="1"
+                required
+                data-testid="input-max-users"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>أقصى مواقع</Label>
+              <Input
+                type="number"
+                value={form.maxSites}
+                onChange={(e) => setForm({ ...form, maxSites: e.target.value })}
+                min="1"
+                required
+                data-testid="input-max-sites"
+              />
+            </div>
+          </div>
+          <p className="text-muted-foreground/70 text-[11px]">العميل ينفذ أمر التثبيت على سيرفره → يتسجل HWID تلقائياً → يُنشأ الترخيص فوراً بالإعدادات أعلاه</p>
           <div className="space-y-2">
             <Label>ملاحظات (اختياري)</Label>
             <Textarea
@@ -346,6 +410,18 @@ function PatchDetailsDialog({ patch, onClose, onCopyCommand, onDelete, onCopyTok
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">الحالة</span>
             <PatchStatusBadge status={live.status} />
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground">المدة</span>
+            <span>{live.durationDays || 30} يوم</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground">أقصى مستخدمين</span>
+            <span>{live.maxUsers || 100}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-muted-foreground">أقصى مواقع</span>
+            <span>{live.maxSites || 1}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">تاريخ الإنشاء</span>
