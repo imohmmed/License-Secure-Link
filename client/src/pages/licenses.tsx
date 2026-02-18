@@ -60,7 +60,7 @@ function StatusBadge({ status }: { status: string }) {
     inactive: { label: "غير نشط", className: "bg-muted text-muted-foreground no-default-hover-elevate no-default-active-elevate" },
     disabled: { label: "معطل", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate" },
     suspended: { label: "موقوف", className: "bg-red-500/15 text-red-600 dark:text-red-400 no-default-hover-elevate no-default-active-elevate" },
-    expired: { label: "منتهي", className: "bg-red-500/15 text-red-600 dark:text-red-400 no-default-hover-elevate no-default-active-elevate" },
+    expired: { label: "منتهي", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate" },
   };
   const v = variants[status] || variants.inactive;
   return <Badge variant="outline" className={v.className}>{v.label}</Badge>;

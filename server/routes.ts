@@ -508,8 +508,8 @@ export async function registerRoutes(
           { label: "معرف الترخيص", value: license.licenseId },
           { label: "الحالة السابقة", value: statusLabels[license.status] || license.status },
           { label: "الحالة الجديدة", value: statusLabels[status] || status },
-          { label: "تأثير على الإيميوليتر", value: status === "active" ? "يعمل بشكل طبيعي - st=1" : status === "disabled" ? "يعمل بوضع disabled - st=0 (قراءة فقط)" : status === "suspended" ? "موقوف - الإيميوليتر يتوقف تماماً" : status === "expired" ? "يتوقف تماماً - 403 Forbidden" : "غير فعال" },
-          { label: "آلية التطبيق", value: status === "disabled" ? "verify يرجع valid:true + status:disabled → الإيميوليتر يضل شغال بس بوضع st=0" : status === "suspended" ? "license-data يرجع 403 → الإيميوليتر يتوقف" : status === "expired" ? "license-data يرجع 403 → الإيميوليتر يرجع 503 → SAS4 يتوقف" : `license-data يرجع st=${status === "active" ? "1" : "0"}` },
+          { label: "تأثير على الإيميوليتر", value: status === "active" ? "يعمل بشكل طبيعي - st=1" : status === "disabled" ? "يعمل بوضع disabled - st=0 (قراءة فقط)" : status === "suspended" ? "موقوف - الإيميوليتر يتوقف تماماً" : "غير فعال" },
+          { label: "آلية التطبيق", value: status === "disabled" ? "verify يرجع valid:true + status:disabled → الإيميوليتر يضل شغال بس بوضع st=0" : status === "suspended" ? "license-data يرجع 403 → الإيميوليتر يتوقف" : `license-data يرجع st=${status === "active" ? "1" : "0"}` },
         ],
       }),
     });
@@ -868,10 +868,10 @@ export async function registerRoutes(
     }
 
     if (license.status === "expired" || new Date(license.expiresAt) < new Date()) {
-      if (license.status !== "expired") {
-        await storage.updateLicense(license.id, { status: "expired" });
+      if (license.status !== "disabled") {
+        await storage.updateLicense(license.id, { status: "disabled" });
       }
-      return res.status(403).json({ error: "License has expired", status: "expired" });
+      return res.status(403).json({ error: "License has expired", status: "disabled" });
     }
 
     if (license.hardwareId && license.hardwareId !== hardware_id) {
@@ -996,26 +996,26 @@ export async function registerRoutes(
     }
 
     if (new Date(license.expiresAt) < new Date()) {
-      if (license.status !== "expired") {
-        await storage.updateLicense(license.id, { status: "expired" });
+      if (license.status !== "disabled") {
+        await storage.updateLicense(license.id, { status: "disabled" });
       }
       await storage.createActivityLog({
         licenseId: license.id,
         serverId: license.serverId,
-        action: "verify_expired",
+        action: "verify_disabled",
         details: JSON.stringify({
-          title: `الترخيص ${license_id} منتهي الصلاحية - تم حظر الإيميوليتر`,
+          title: `الترخيص ${license_id} منتهي الصلاحية - تم تعطيله تلقائياً`,
           sections: [
             { label: "معرف الترخيص", value: license_id },
             { label: "تاريخ الانتهاء", value: new Date(license.expiresAt).toLocaleString("ar-IQ") },
             { label: "HWID", value: hardware_id.substring(0, 32) + "...", mono: true },
-            { label: "النتيجة", value: "valid: false → الإيميوليتر يتوقف → SAS4 يرجع خطأ" },
-            { label: "آلية الحظر", value: "license-data يرجع 403 → الإيميوليتر يرجع 503 لـ SAS4 → البرنامج يتوقف تماماً" },
+            { label: "النتيجة", value: "valid: true + status: disabled → الإيميوليتر يشتغل بوضع st=0 (قراءة فقط)" },
+            { label: "الحالة الجديدة", value: "disabled (معطل)" },
             { label: "IP المرسل", value: req.ip || "غير معروف" },
           ],
         }),
       });
-      return res.json({ valid: false, status: "expired", error: "License has expired" });
+      return res.json({ valid: true, status: "disabled", message: "License expired - disabled mode" });
     }
 
     if (license.status === "disabled") {
@@ -1117,10 +1117,14 @@ export async function registerRoutes(
     if (license.status === "suspended") return res.status(403).json({ s: "0" });
 
     if (new Date(license.expiresAt) < new Date()) {
-      if (license.status !== "expired") {
-        await storage.updateLicense(license.id, { status: "expired" });
+      if (license.status !== "disabled") {
+        await storage.updateLicense(license.id, { status: "disabled" });
       }
-      return res.status(403).json({ s: "0" });
+      const payload = buildSAS4Payload(
+        license.licenseId, license.hardwareId,
+        new Date(license.expiresAt), license.maxUsers, license.maxSites, "disabled"
+      );
+      return res.json(payload);
     }
 
     const payload = buildSAS4Payload(
@@ -1140,10 +1144,14 @@ export async function registerRoutes(
     if (license.status === "suspended") return res.status(403).json({ s: "0" });
 
     if (new Date(license.expiresAt) < new Date()) {
-      if (license.status !== "expired") {
-        await storage.updateLicense(license.id, { status: "expired" });
+      if (license.status !== "disabled") {
+        await storage.updateLicense(license.id, { status: "disabled" });
       }
-      return res.status(403).json({ s: "0" });
+      const payload = buildSAS4Payload(
+        license.licenseId, license.hardwareId,
+        new Date(license.expiresAt), license.maxUsers, license.maxSites, "disabled"
+      );
+      return res.json(payload);
     }
 
     const payload = buildSAS4Payload(
