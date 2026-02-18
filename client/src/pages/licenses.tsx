@@ -76,14 +76,21 @@ export default function Licenses() {
 
   const { data: licenses, isLoading } = useQuery<License[]>({
     queryKey: ["/api/licenses"],
+    refetchOnMount: "always",
+    refetchInterval: 30000,
+    staleTime: 0,
   });
 
   const { data: serversList } = useQuery<ServerType[]>({
     queryKey: ["/api/servers"],
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 
   const { data: availableClients } = useQuery<PatchToken[]>({
     queryKey: ["/api/patches/available"],
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 
   const createMutation = useMutation({
@@ -540,7 +547,7 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
             />
           </div>
           <div className="space-y-2">
-            <Label>السيرفر {selectedPatchId ? "(مطلوب للنشر)" : ""}</Label>
+            <Label>السيرفر (اختياري)</Label>
             <Select value={form.serverId} onValueChange={(v) => setForm({ ...form, serverId: v })}>
               <SelectTrigger data-testid="select-server">
                 <SelectValue placeholder="اختر سيرفر..." />
@@ -551,12 +558,12 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
                 ))}
               </SelectContent>
             </Select>
-            {selectedPatchId && !form.serverId && (
-              <p className="text-xs text-destructive">
-                تحذير: بدون اختيار سيرفر، الترخيص ما راح ينشر تلقائياً على جهاز العميل!
+            {selectedPatchId && (
+              <p className="text-xs text-muted-foreground">
+                العميل جاي من باتش — الإيميوليتر مُثبت مسبقاً، لا حاجة لـ SSH
               </p>
             )}
-            {selectedPatchId && form.serverId && (
+            {!selectedPatchId && form.serverId && (
               <p className="text-xs text-muted-foreground">
                 سيتم نشر الإيميوليتر تلقائياً على السيرفر المختار عبر SSH
               </p>
