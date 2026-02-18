@@ -253,7 +253,7 @@ export function generateLicenseFileContent(
     pid: licenseId, hwid: hardwareId,
     exp: expiresAt.toISOString().replace("T", " ").substring(0, 19),
     st: status === "active" ? "1" : "0",
-    mu: "10000000", ms: "10000000",
+    mu: maxUsers.toString(), ms: maxSites.toString(),
     id: licenseId,
     hash: crypto.createHash("sha256").update(`${licenseId}:${hardwareId}:${expiresAt.toISOString()}`).digest("hex"),
     ftrs: FEATURES,
