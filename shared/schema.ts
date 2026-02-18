@@ -90,6 +90,7 @@ export const patchTokens = pgTable("patch_tokens", {
   activatedIp: text("activated_ip"),
   hardwareId: text("hardware_id"),
   hwidSalt: text("hwid_salt"),
+  rawHwidFingerprint: text("raw_hwid_fingerprint"),
   usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
