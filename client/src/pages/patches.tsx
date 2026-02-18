@@ -267,9 +267,6 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
   const [form, setForm] = useState({
     personName: "",
     targetIp: "",
-    sshUsername: "root",
-    sshPassword: "",
-    sshPort: "22",
     notes: "",
   });
 
@@ -278,9 +275,6 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
     onSubmit({
       personName: form.personName,
       targetIp: form.targetIp || null,
-      sshUsername: form.sshUsername || "root",
-      sshPassword: form.sshPassword || null,
-      sshPort: form.sshPort || "22",
       notes: form.notes || null,
     });
   };
