@@ -94,10 +94,15 @@ export class DatabaseStorage implements IStorage {
 
   async getActiveLicenseByHwid(hwid: string): Promise<License | undefined> {
     const all = await db.select().from(licenses).where(eq(licenses.hardwareId, hwid));
-    const active = all.filter(l => (l.status === "active" || l.status === "disabled") && new Date(l.expiresAt) > new Date());
-    if (active.length === 0) return undefined;
-    active.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return active[0];
+    const nonSuspended = all.filter(l => l.status !== "suspended" && l.status !== "inactive");
+    if (nonSuspended.length === 0) return undefined;
+    const active = nonSuspended.filter(l => l.status === "active" && new Date(l.expiresAt) > new Date());
+    if (active.length > 0) {
+      active.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return active[0];
+    }
+    nonSuspended.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return nonSuspended[0];
   }
 
   async getLicensesByServerId(serverId: string): Promise<License[]> {
