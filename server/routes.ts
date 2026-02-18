@@ -408,7 +408,8 @@ export async function registerRoutes(
     });
 
     let deployResult = null;
-    if (parsed.data.serverId) {
+    const isFromPatch = !!patchData;
+    if (parsed.data.serverId && !isFromPatch) {
       const server = await storage.getServer(parsed.data.serverId);
       const licenseRecord = await storage.getLicense(license.id);
       const deployHwid = licenseRecord?.hardwareId || server?.hardwareId;
@@ -1345,46 +1346,36 @@ echo "Installation completed successfully"
   });
 
   app.post("/api/patches", async (req, res) => {
-    const { sshUsername, sshPassword, sshPort, ...patchBody } = req.body;
-    const parsed = insertPatchTokenSchema.safeParse(patchBody);
+    const parsed = insertPatchTokenSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ message: parsed.error.message });
     }
 
     const targetIp = parsed.data.targetIp;
     let autoServerId: string | null = null;
-    const parsedPort = sshPort ? parseInt(sshPort) : 22;
-    const validPort = !isNaN(parsedPort) && parsedPort >= 1 && parsedPort <= 65535 ? parsedPort : 22;
 
     if (targetIp) {
       const allServers = await storage.getServers();
       const existingServer = allServers.find((s) => s.host === targetIp);
       if (existingServer) {
         autoServerId = existingServer.id;
-        if (sshPassword && sshPassword !== "changeme") {
-          await storage.updateServer(existingServer.id, {
-            username: sshUsername || "root",
-            password: sshPassword,
-            port: validPort,
-          });
-        }
       } else {
         const newServer = await storage.createServer({
           name: `${parsed.data.personName} - ${targetIp}`,
           host: targetIp,
-          port: validPort,
-          username: sshUsername || "root",
-          password: sshPassword || "changeme",
+          port: 22,
+          username: "root",
+          password: "changeme",
         });
         autoServerId = newServer.id;
         await storage.createActivityLog({
           action: "auto_create_server",
           serverId: newServer.id,
           details: JSON.stringify({
-            title: `تم إنشاء سيرفر تلقائي من الباتش: ${targetIp}`,
+            title: `تم إنشاء سجل سيرفر تلقائي من الباتش: ${targetIp}`,
             sections: [
               { label: "السيرفر", value: `${newServer.name} (${targetIp})` },
-              { label: "ملاحظة", value: "تم إنشاؤه تلقائياً — عدّل كلمة مرور SSH من صفحة السيرفرات" },
+              { label: "ملاحظة", value: "سجل للربط فقط — العميل بنفسه نصّب السكربت عبر الباتش" },
             ],
           }),
         });

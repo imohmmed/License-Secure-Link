@@ -308,40 +308,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
               data-testid="input-target-ip"
             />
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-2">
-              <Label>مستخدم SSH</Label>
-              <Input
-                value={form.sshUsername}
-                onChange={(e) => setForm({ ...form, sshUsername: e.target.value })}
-                placeholder="root"
-                dir="ltr"
-                data-testid="input-ssh-username"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>كلمة مرور SSH</Label>
-              <Input
-                type="password"
-                value={form.sshPassword}
-                onChange={(e) => setForm({ ...form, sshPassword: e.target.value })}
-                placeholder="كلمة المرور"
-                dir="ltr"
-                data-testid="input-ssh-password"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>بورت SSH</Label>
-              <Input
-                value={form.sshPort}
-                onChange={(e) => setForm({ ...form, sshPort: e.target.value })}
-                placeholder="22"
-                dir="ltr"
-                data-testid="input-ssh-port"
-              />
-            </div>
-          </div>
-          <p className="text-muted-foreground/70 text-[11px]">بيانات SSH مطلوبة لنشر الإيميوليتر تلقائياً عند إنشاء الترخيص</p>
+          <p className="text-muted-foreground/70 text-[11px]">العميل ينفذ أمر التثبيت على سيرفره → يتسجل تلقائياً → تسويله ترخيص من صفحة التراخيص</p>
           <div className="space-y-2">
             <Label>ملاحظات (اختياري)</Label>
             <Textarea
