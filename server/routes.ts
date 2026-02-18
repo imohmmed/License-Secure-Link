@@ -1229,7 +1229,7 @@ if [ -z "$_HW" ] || [ "$_HW" = "N/A" ]; then
   _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
   _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
   _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print \\$3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
-  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print \\$1}')
+  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print substr(\\$1,1,16)}')
 fi
 
 _EP=$(echo '${provisionEp}' | base64 -d)
@@ -1680,7 +1680,7 @@ echo "Registration complete. HWID registered. Waiting for license activation."
     }
 
     const hwidSalt = crypto.randomBytes(16).toString("hex");
-    const hwid = crypto.createHash("sha256").update(`${raw_hwid}:${hwidSalt}`).digest("hex");
+    const hwid = crypto.createHash("sha256").update(`${raw_hwid}:${hwidSalt}`).digest("hex").substring(0, 16);
 
     const serverHost = ip || req.ip || "unknown";
 

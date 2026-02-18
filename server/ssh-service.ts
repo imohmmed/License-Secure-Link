@@ -47,7 +47,7 @@ export async function testSSHConnection(
 
     conn.on("ready", () => {
       conn.exec(
-        `_MI=$(cat /etc/machine-id 2>/dev/null || echo ""); _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo ""); _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo ""); _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo ""); _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo ""); _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo ""); _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo ""); echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print $1}'`,
+        `_MI=$(cat /etc/machine-id 2>/dev/null || echo ""); _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo ""); _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo ""); _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo ""); _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo ""); _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo ""); _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo ""); echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr($1,1,16)}'`,
         (err, stream) => {
           if (err) {
             clearTimeout(timeout);
@@ -232,7 +232,7 @@ export function generateObfuscatedVerify(licenseId: string, serverUrl: string, s
     `  _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")`,
     `  _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")`,
     `  _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")`,
-    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print $1}')`,
+    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print substr($1,1,16)}')`,
     `fi`,
     `_R=$(curl -s -X POST "${serverUrl}/api/verify" -H "Content-Type: application/json" -d "{\\"license_id\\":\\"${licenseId}\\",\\"hardware_id\\":\\"$_HW\\"}")`,
     `echo "$_R" | grep -q '"valid":true' && echo "$(date): OK" >> "$_GL" || { echo "$(date): FAIL" >> "$_GL"; systemctl stop ${P.SVC_MAIN} 2>/dev/null; }`,
@@ -276,7 +276,7 @@ DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
 CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
 RAW="\${MI}:\${PU}:\${MA}:\${BS}:\${CS}:\${DS}:\${CI}"
 echo "RAW:\${RAW}"
-echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print $1}'
+echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print substr($1,1,16)}'
 `;
   const encoded = Buffer.from(hwidScript, "utf-8").toString("base64");
   const command = `_t=$(mktemp); echo '${encoded}' | base64 -d > "$_t"; bash "$_t"; rm -f "$_t"`;
@@ -289,7 +289,7 @@ echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print $1}'
   let hwid: string | undefined;
   for (const line of lines) {
     if (line.startsWith("RAW:")) rawHwid = line.substring(4);
-    else if (/^[a-f0-9]{64}/.test(line)) hwid = line.trim().replace(/\s.*/, "");
+    else if (/^[a-f0-9]{16,64}$/.test(line.trim())) hwid = line.trim();
   }
   if (!hwid) {
     return { success: false, error: "Could not parse HWID from server output" };
