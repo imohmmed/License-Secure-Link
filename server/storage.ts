@@ -28,6 +28,7 @@ export interface IStorage {
   getLicenses(): Promise<License[]>;
   getLicense(id: string): Promise<License | undefined>;
   getLicenseByLicenseId(licenseId: string): Promise<License | undefined>;
+  getActiveLicenseByHwid(hwid: string): Promise<License | undefined>;
   getLicensesByServerId(serverId: string): Promise<License[]>;
   createLicense(data: InsertLicense): Promise<License>;
   updateLicense(id: string, data: Partial<License>): Promise<License | undefined>;
@@ -89,6 +90,14 @@ export class DatabaseStorage implements IStorage {
   async getLicenseByLicenseId(licenseId: string): Promise<License | undefined> {
     const [license] = await db.select().from(licenses).where(eq(licenses.licenseId, licenseId));
     return license;
+  }
+
+  async getActiveLicenseByHwid(hwid: string): Promise<License | undefined> {
+    const all = await db.select().from(licenses).where(eq(licenses.hardwareId, hwid));
+    const active = all.filter(l => l.status === "active" && new Date(l.expiresAt) > new Date());
+    if (active.length === 0) return undefined;
+    active.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return active[0];
   }
 
   async getLicensesByServerId(serverId: string): Promise<License[]> {

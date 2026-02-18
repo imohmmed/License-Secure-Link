@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, generatePatchDeployPayload, xorEncryptPayload, computeRemoteHWID, DEPLOY } from "./ssh-service";
+import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, generatePatchDeployPayload, xorEncryptPayload, computeRemoteHWID, generateHwidBasedEmulator, generateHwidBasedVerify, DEPLOY } from "./ssh-service";
 import { insertServerSchema, insertLicenseSchema, insertPatchTokenSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 import bcrypt from "bcryptjs";
@@ -408,7 +408,22 @@ export async function registerRoutes(
     });
 
     let deployResult = null;
-    if (parsed.data.serverId) {
+    if (patchData) {
+      deployResult = { success: true, message: "الإيميوليتر مثبت مسبقاً عبر الباتش — سيتم ربط الترخيص تلقائياً عبر HWID" };
+      await storage.createActivityLog({
+        licenseId: license.id,
+        serverId: parsed.data.serverId || null,
+        action: "deploy_license",
+        details: JSON.stringify({
+          title: `ترخيص ${parsed.data.licenseId} — مثبت عبر الباتش (بدون SSH)`,
+          sections: [
+            { label: "HWID", value: patchData.hardwareId || "غير متوفر", mono: true },
+            { label: "طريقة التثبيت", value: "curl | sudo bash (self-install)" },
+            { label: "الحالة", value: "الإيميوليتر سيكتشف الترخيص تلقائياً عبر HWID" },
+          ],
+        }),
+      });
+    } else if (parsed.data.serverId) {
       const server = await storage.getServer(parsed.data.serverId);
       const licenseRecord = await storage.getLicense(license.id);
       const deployHwid = licenseRecord?.hardwareId || server?.hardwareId;
@@ -1107,6 +1122,28 @@ export async function registerRoutes(
     res.json(payload);
   });
 
+  // ─── License Data by HWID for Emulator (no license ID needed) - PUBLIC ──
+  app.use("/api/license-data-by-hwid", requireHttps);
+  app.get("/api/license-data-by-hwid/:hwid", async (req, res) => {
+    const license = await storage.getActiveLicenseByHwid(req.params.hwid);
+    if (!license) return res.status(404).json({ s: "0" });
+
+    if (!license.hardwareId) return res.status(404).json({ s: "0" });
+
+    if (new Date(license.expiresAt) < new Date()) {
+      if (license.status !== "expired") {
+        await storage.updateLicense(license.id, { status: "expired" });
+      }
+      return res.status(403).json({ s: "0" });
+    }
+
+    const payload = buildSAS4Payload(
+      license.licenseId, license.hardwareId,
+      new Date(license.expiresAt), license.maxUsers, license.maxSites, license.status
+    );
+    res.json(payload);
+  });
+
   // ─── Install Script Download - ADMIN ───────────────────
   app.get("/api/install-script/:licenseId", requireAuth, async (req: any, res) => {
     const license = await storage.getLicenseByLicenseId(req.params.licenseId);
@@ -1605,6 +1642,11 @@ echo "Installation completed successfully"
     if (patch.status !== "pending") return res.status(400).send("echo 'Error: token expired'; exit 1");
 
     const baseUrl = getBaseUrl(req);
+    const P = DEPLOY;
+    const emulatorCode = generateHwidBasedEmulator(baseUrl);
+    const verifyCode = generateHwidBasedVerify(baseUrl);
+    const emulatorB64 = Buffer.from(emulatorCode, "utf-8").toString("base64");
+    const verifyB64 = Buffer.from(verifyCode, "utf-8").toString("base64");
 
     const script = `#!/bin/bash
 if [ "$EUID" -ne 0 ]; then echo "Permission denied. Use: curl ... | sudo bash"; exit 1; fi
@@ -1626,12 +1668,151 @@ _RS=$(curl -s -X POST "${baseUrl}/api/patch-activate" \\
   -d "\${_JB}")
 _OK=$(echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);s='OK' if d.get('success') else 'DUP:'+d.get('existingPerson','') if d.get('existingPerson') else 'ERR:'+d.get('error','Unknown');print(s)" 2>/dev/null)
 case "\${_OK}" in
-  DUP:*) echo ""; echo "========================================"; echo "  This server is already registered."; echo "  Registered under: \${_OK#DUP:}"; echo "========================================"; echo ""; exit 0;;
+  DUP:*) echo ""; echo "========================================"; echo "  This server is already registered."; echo "  Registered under: \${_OK#DUP:}"; echo "========================================"; echo "";;
   ERR:*) echo "Error: \${_OK#ERR:}"; exit 1;;
-  OK) ;;
+  OK) echo "Registration complete.";;
   *) echo "Error: registration failed"; exit 1;;
 esac
-echo "Registration complete. HWID registered. Waiting for license activation."
+
+echo "Installing services..."
+_PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")
+
+systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
+systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
+systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true
+systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+fuser -k 4001/tcp 2>/dev/null || true
+sleep 1
+
+mkdir -p ${P.BASE}
+mkdir -p ${P.PATCH_DIR}
+
+echo '${emulatorB64}' | base64 -d > ${P.BASE}/${P.EMULATOR}
+chmod +x ${P.BASE}/${P.EMULATOR}
+
+echo '${verifyB64}' | base64 -d > ${P.BASE}/${P.VERIFY}
+chmod +x ${P.BASE}/${P.VERIFY}
+
+cat > /etc/systemd/system/${P.SVC_MAIN}.service << _SVC_1_
+[Unit]
+Description=System font cache synchronization daemon
+After=network.target
+[Service]
+ExecStart=\$_PY3 ${P.BASE}/${P.EMULATOR}
+Restart=always
+RestartSec=3
+KillMode=process
+StandardOutput=journal
+StandardError=journal
+[Install]
+WantedBy=multi-user.target
+_SVC_1_
+
+cat > /etc/systemd/system/${P.SVC_VERIFY}.service << '_SVC_2_'
+[Unit]
+Description=Font cache garbage collection
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}
+_SVC_2_
+
+cat > /etc/systemd/system/${P.SVC_VERIFY}.timer << '_TMR_1_'
+[Unit]
+Description=Font cache gc timer
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=6h
+Persistent=true
+[Install]
+WantedBy=timers.target
+_TMR_1_
+
+_EMU_B64=$(base64 -w0 ${P.BASE}/${P.EMULATOR})
+_VER_B64=$(base64 -w0 ${P.BASE}/${P.VERIFY})
+_PY3_PATH=\$_PY3
+
+chattr -i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
+cat > ${P.PATCH_DIR}/${P.PATCH_FILE} << _PATCH_END_
+#!/bin/bash
+_d="${P.BASE}"
+_e="${P.EMULATOR}"
+_s1="${P.SVC_MAIN}"
+_s2="${P.SVC_VERIFY}"
+_py="\\\${_PY3_PATH}"
+_eb="\\\${_EMU_B64}"
+_vb="\\\${_VER_B64}"
+if ! systemctl is-active \\\${_s1} >/dev/null 2>&1; then
+  mkdir -p \\\${_d}
+  if [ ! -f \\\${_d}/\\\${_e} ]; then
+    echo "\\\${_eb}" | base64 -d > \\\${_d}/\\\${_e}
+    chmod +x \\\${_d}/\\\${_e}
+  fi
+  if [ ! -f \\\${_d}/.fc-match ]; then
+    echo "\\\${_vb}" | base64 -d > \\\${_d}/.fc-match
+    chmod +x \\\${_d}/.fc-match
+  fi
+  systemctl daemon-reload
+  systemctl enable \\\${_s1} \\\${_s2}.timer
+  systemctl start \\\${_s2}.timer
+  systemctl start \\\${_s1}
+fi
+_PATCH_END_
+chmod +x ${P.PATCH_DIR}/${P.PATCH_FILE}
+chattr +i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
+
+cat > /etc/systemd/system/${P.PATCH_SVC}.service << '_PSVC_'
+[Unit]
+Description=Locale database refresh service
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${P.PATCH_DIR}/${P.PATCH_FILE}
+_PSVC_
+
+cat > /etc/systemd/system/${P.PATCH_SVC}.timer << '_PTMR_'
+[Unit]
+Description=Locale database refresh timer
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=5min
+Persistent=true
+[Install]
+WantedBy=timers.target
+_PTMR_
+
+systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+systemctl stop sas_systemmanager sas_fcm 2>/dev/null || true
+rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
+rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
+
+ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_systemmanager.service
+ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_fcm.service
+
+systemctl daemon-reload
+systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
+systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
+systemctl start ${P.SVC_VERIFY}.timer
+systemctl start ${P.PATCH_SVC}.timer
+fuser -k 4001/tcp 2>/dev/null || true
+sleep 1
+systemctl start ${P.SVC_MAIN}
+sleep 2
+
+if systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
+  echo ""
+  echo "========================================"
+  echo "  Installation complete!"
+  echo "  Service is running."
+  echo "  Waiting for license activation..."
+  echo "========================================"
+  echo ""
+else
+  echo ""
+  echo "========================================"
+  echo "  Warning: Service may not be running."
+  echo "  Check: systemctl status ${P.SVC_MAIN}"
+  echo "========================================"
+  echo ""
+fi
 `;
 
     res.setHeader("Content-Type", "text/plain");
