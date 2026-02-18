@@ -194,8 +194,8 @@ export default function PatchServers() {
                     <span className="flex items-center gap-1.5 text-muted-foreground">
                       <Terminal className="h-3 w-3" /> Hardware ID
                     </span>
-                    <span className="font-mono text-xs truncate max-w-[120px]" data-testid={`text-patch-hwid-${patch.id}`}>
-                      {patch.hardwareId ? patch.hardwareId.substring(0, 16) + "..." : "غير محدد"}
+                    <span className="font-mono text-xs" data-testid={`text-patch-hwid-${patch.id}`}>
+                      {patch.hardwareId || "غير محدد"}
                     </span>
                   </div>
                 </div>
@@ -290,7 +290,7 @@ function EditPatchDialog({ patch, onOpenChange, onSubmit, isPending }: {
             <div className="space-y-2 text-xs text-muted-foreground">
               <div className="flex justify-between gap-2"><span>IP:</span><span className="font-mono">{patch.activatedIp || "—"}</span></div>
               <div className="flex justify-between gap-2"><span>Hostname:</span><span className="font-mono">{patch.activatedHostname || "—"}</span></div>
-              <div className="flex justify-between gap-2"><span>HWID:</span><span className="font-mono truncate max-w-[200px]">{patch.hardwareId || "—"}</span></div>
+              <div className="flex justify-between gap-2"><span>HWID:</span><span className="font-mono">{patch.hardwareId || "—"}</span></div>
             </div>
           )}
           <DialogFooter>

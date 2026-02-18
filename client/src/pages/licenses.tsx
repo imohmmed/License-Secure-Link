@@ -276,7 +276,7 @@ export default function Licenses() {
                       <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
                         <span className="flex items-center gap-1">
                           <Shield className="h-3 w-3" />
-                          {license.hardwareId ? license.hardwareId.substring(0, 16) + "..." : "غير مقفل"}
+                          {license.hardwareId || "غير مقفل"}
                         </span>
                         <span className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" />
