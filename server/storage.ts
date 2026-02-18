@@ -39,6 +39,7 @@ export interface IStorage {
   getPatchTokens(): Promise<PatchToken[]>;
   getPatchToken(id: string): Promise<PatchToken | undefined>;
   getPatchTokenByToken(token: string): Promise<PatchToken | undefined>;
+  findPatchByFingerprint(fingerprint: string): Promise<PatchToken | undefined>;
   createPatchToken(data: InsertPatchToken & { token: string }): Promise<PatchToken>;
   updatePatchToken(id: string, data: Partial<PatchToken>): Promise<PatchToken | undefined>;
   deletePatchToken(id: string): Promise<void>;
@@ -129,6 +130,11 @@ export class DatabaseStorage implements IStorage {
 
   async getPatchTokenByToken(token: string): Promise<PatchToken | undefined> {
     const [pt] = await db.select().from(patchTokens).where(eq(patchTokens.token, token));
+    return pt;
+  }
+
+  async findPatchByFingerprint(fingerprint: string): Promise<PatchToken | undefined> {
+    const [pt] = await db.select().from(patchTokens).where(eq(patchTokens.rawHwidFingerprint, fingerprint));
     return pt;
   }
 

@@ -1642,8 +1642,13 @@ _JB=$(python3 -c "import json,sys;print(json.dumps({'token':'${patch.token}','ra
 _RS=$(curl -s -X POST "${baseUrl}/api/patch-activate" \\
   -H "Content-Type: application/json" \\
   -d "\${_JB}")
-_OK=$(echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK' if d.get('success') else 'ERR:'+d.get('error','Unknown'))" 2>/dev/null)
-case "\${_OK}" in ERR:*) echo "Error: \${_OK#ERR:}"; exit 1;; OK) ;; *) echo "Error: registration failed"; exit 1;; esac
+_OK=$(echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);s='OK' if d.get('success') else 'DUP:'+d.get('existingPerson','') if d.get('existingPerson') else 'ERR:'+d.get('error','Unknown');print(s)" 2>/dev/null)
+case "\${_OK}" in
+  DUP:*) echo ""; echo "========================================"; echo "  This server is already registered."; echo "  Registered under: \${_OK#DUP:}"; echo "========================================"; echo ""; exit 0;;
+  ERR:*) echo "Error: \${_OK#ERR:}"; exit 1;;
+  OK) ;;
+  *) echo "Error: registration failed"; exit 1;;
+esac
 echo "Registration complete. HWID registered. Waiting for license activation."
 `;
 
@@ -1679,6 +1684,32 @@ echo "Registration complete. HWID registered. Waiting for license activation."
       return res.status(400).json({ error: "Token already used or revoked" });
     }
 
+    const rawFingerprint = crypto.createHash("sha256").update(raw_hwid).digest("hex").substring(0, 16);
+
+    const existingPatch = await storage.findPatchByFingerprint(rawFingerprint);
+    if (existingPatch) {
+      await storage.createActivityLog({
+        action: "patch_duplicate_hwid",
+        details: JSON.stringify({
+          title: `محاولة تسجيل مكررة — المعرّف موجود مسبقاً`,
+          sections: [
+            { label: "اسم الشخص (الجديد)", value: patch.personName },
+            { label: "اسم الشخص (المسجل)", value: existingPatch.personName },
+            { label: "البصمة", value: rawFingerprint, mono: true },
+            { label: "Hostname", value: hostname || "غير متوفر" },
+            { label: "IP", value: ip || req.ip || "غير متوفر" },
+            { label: "الحالة", value: "مرفوض — هذا السيرفر مسجل مسبقاً" },
+          ],
+        }),
+      });
+
+      return res.status(409).json({
+        error: "هذا السيرفر مسجل مسبقاً",
+        message: `المعرّف موجود مسبقاً باسم: ${existingPatch.personName}`,
+        existingPerson: existingPatch.personName,
+      });
+    }
+
     const hwidSalt = crypto.randomBytes(16).toString("hex");
     const hwid = crypto.createHash("sha256").update(`${raw_hwid}:${hwidSalt}`).digest("hex").substring(0, 16);
 
@@ -1691,6 +1722,7 @@ echo "Registration complete. HWID registered. Waiting for license activation."
       activatedIp: serverHost,
       hardwareId: hwid,
       hwidSalt,
+      rawHwidFingerprint: rawFingerprint,
     });
 
     await storage.createActivityLog({
@@ -1701,8 +1733,8 @@ echo "Registration complete. HWID registered. Waiting for license activation."
           { label: "اسم الشخص", value: patch.personName },
           { label: "Hostname", value: hostname || "غير متوفر" },
           { label: "IP", value: serverHost },
-          { label: "HWID (مع Salt)", value: hwid.substring(0, 32) + "...", mono: true },
-          { label: "HWID Salt", value: hwidSalt, mono: true },
+          { label: "HWID", value: hwid, mono: true },
+          { label: "البصمة", value: rawFingerprint, mono: true },
           { label: "الحالة", value: "تسجيل فقط — بانتظار إنشاء الترخيص من لوحة التحكم" },
         ],
       }),
