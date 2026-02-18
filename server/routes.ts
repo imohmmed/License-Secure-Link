@@ -329,6 +329,14 @@ export async function registerRoutes(
       }
       patchData = patch;
       if (!body.clientId) body.clientId = patch.personName;
+
+      if (!body.serverId && patch.activatedIp) {
+        const allServers = await storage.getServers();
+        const matchingServer = allServers.find((s) => s.host === patch.activatedIp);
+        if (matchingServer) {
+          body.serverId = matchingServer.id;
+        }
+      }
     }
 
     const parsed = insertLicenseSchema.safeParse(body);

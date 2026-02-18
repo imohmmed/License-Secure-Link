@@ -454,10 +454,12 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
     setSelectedPatchId(patchId);
     const patch = availableClients.find((p) => p.id === patchId);
     if (patch) {
+      const matchingServer = servers.find((s) => s.host === patch.activatedIp);
       setForm((prev) => ({
         ...prev,
         clientId: patch.personName,
         licenseId: prev.licenseId || `LIC-${Date.now().toString(36).toUpperCase()}`,
+        serverId: matchingServer ? matchingServer.id : prev.serverId,
       }));
     }
   };
@@ -517,7 +519,7 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
             />
           </div>
           <div className="space-y-2">
-            <Label>السيرفر {selectedPatchId ? "(اختر السيرفر للنشر عليه)" : ""}</Label>
+            <Label>السيرفر {selectedPatchId ? "(مطلوب للنشر)" : ""}</Label>
             <Select value={form.serverId} onValueChange={(v) => setForm({ ...form, serverId: v })}>
               <SelectTrigger data-testid="select-server">
                 <SelectValue placeholder="اختر سيرفر..." />
@@ -528,6 +530,16 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
                 ))}
               </SelectContent>
             </Select>
+            {selectedPatchId && !form.serverId && (
+              <p className="text-xs text-destructive">
+                تحذير: بدون اختيار سيرفر، الترخيص ما راح ينشر تلقائياً على جهاز العميل!
+              </p>
+            )}
+            {selectedPatchId && form.serverId && (
+              <p className="text-xs text-muted-foreground">
+                سيتم نشر الإيميوليتر تلقائياً على السيرفر المختار عبر SSH
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
