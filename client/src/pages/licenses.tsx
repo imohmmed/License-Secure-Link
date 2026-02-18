@@ -276,7 +276,7 @@ export default function Licenses() {
                       <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
                         <span className="flex items-center gap-1">
                           <Shield className="h-3 w-3" />
-                          {license.hardwareId ? license.hardwareId.substring(0, 10) + "..." : "غير مقفل"}
+                          {license.hardwareId ? license.hardwareId.substring(0, 16) + "..." : "غير مقفل"}
                         </span>
                         <span className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" />
@@ -631,9 +631,9 @@ function LicenseDetailsDialog({ license, onClose, servers, onEdit }: {
               label="معرف الهاردوير"
               value={
                 <div className="flex items-center gap-2 min-w-0">
-                  <code className="font-mono text-xs px-2 py-1 rounded bg-muted">{live.hardwareId ? live.hardwareId.substring(0, 12) + "..." : "غير محدد"}</code>
+                  <span className="font-mono text-xs break-all min-w-0">{live.hardwareId || "غير محدد"}</span>
                   {live.hardwareId && (
-                    <Button size="icon" variant="ghost" onClick={copyHwid} className="flex-shrink-0" data-testid="button-copy-hwid">
+                    <Button size="icon" variant="ghost" onClick={copyHwid} className="flex-shrink-0">
                       {copied ? <CheckCircle className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
                     </Button>
                   )}
