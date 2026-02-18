@@ -36,6 +36,7 @@ import {
   CheckCircle,
   Copy,
   Key,
+  Shield,
 } from "lucide-react";
 import type { PatchToken } from "@shared/schema";
 
