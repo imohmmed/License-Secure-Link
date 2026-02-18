@@ -430,7 +430,7 @@ export async function deployLicenseToServer(
 
 systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
 systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
-systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
+systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
 systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true
 fuser -k 4001/tcp 2>/dev/null || true
 sleep 1
@@ -578,13 +578,9 @@ Persistent=true
 WantedBy=timers.target
 _PTMR_
 
-systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-systemctl stop sas_systemmanager sas_fcm 2>/dev/null || true
+systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
 rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
-
-ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_systemmanager.service
-ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_fcm.service
 
 systemctl daemon-reload
 systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
@@ -696,7 +692,7 @@ export function generatePatchDeployPayload(
     "#!/bin/bash",
     `systemctl stop ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true`,
     `systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true`,
-    "systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true",
+    "systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true",
     "fuser -k 4001/tcp 2>/dev/null || true",
     "sleep 1",
     '_PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")',
@@ -761,12 +757,9 @@ export function generatePatchDeployPayload(
     "[Install]",
     "WantedBy=timers.target",
     "_PTMR_",
-    "systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true",
-    "systemctl stop sas_systemmanager sas_fcm 2>/dev/null || true",
+    "systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true",
     "rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null",
     "rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null",
-    `ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_systemmanager.service`,
-    `ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_fcm.service`,
     "systemctl daemon-reload",
     `systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true`,
     `systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer`,
@@ -819,9 +812,9 @@ rm -f /etc/systemd/system/${P.SVC_VERIFY}.service
 rm -f /etc/systemd/system/${P.SVC_VERIFY}.timer
 rm -f ${P.LOG}
 
-systemctl stop sas_systemmanager sas4-verify.timer sas4-verify sas_fcm 2>/dev/null || true
-systemctl disable sas_systemmanager sas4-verify.timer sas4-verify sas_fcm 2>/dev/null || true
-rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas_fcm.service /etc/systemd/system/sas4-verify.* 2>/dev/null
+systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
+systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
+rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
