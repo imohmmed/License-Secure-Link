@@ -28,16 +28,17 @@ import {
   Package,
   Plus,
   MoreVertical,
-  Terminal,
+  Download,
   Trash2,
   User,
+  Calendar,
   Users,
   Globe,
   Clock,
   CheckCircle,
+  XCircle,
   Copy,
   Key,
-  Shield,
 } from "lucide-react";
 import type { PatchToken } from "@shared/schema";
 
@@ -59,9 +60,6 @@ export default function Patches() {
 
   const { data: patches, isLoading } = useQuery<PatchToken[]>({
     queryKey: ["/api/patches"],
-    refetchOnMount: "always",
-    refetchInterval: 30000,
-    staleTime: 0,
   });
 
   const createMutation = useMutation({
@@ -95,11 +93,8 @@ export default function Patches() {
     },
   });
 
-  const copyCommand = (token: string) => {
-    const cmd = `curl -sL https://lic.tecn0link.net/api/patch-run/${token} | sudo bash`;
-    navigator.clipboard.writeText(cmd);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleDownload = (token: string) => {
+    window.open(`/api/patch-script/${token}`, "_blank");
   };
 
   const copyToken = (token: string) => {
@@ -152,31 +147,26 @@ export default function Patches() {
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground flex-wrap">
                         <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {patch.durationDays || 30} يوم
+                          <Calendar className="h-3 w-3" />
+                          {patch.durationDays} يوم
                         </span>
                         <span className="flex items-center gap-1">
                           <Users className="h-3 w-3" />
-                          {patch.maxUsers || 100} مستخدم
+                          {patch.maxUsers.toLocaleString()} مستخدم
                         </span>
                         <span className="flex items-center gap-1">
                           <Globe className="h-3 w-3" />
-                          {patch.maxSites || 1} موقع
+                          {patch.maxSites} موقع
                         </span>
-                        {patch.status === "used" && patch.activatedHostname && (
-                          <span className="flex items-center gap-1">
-                            <Shield className="h-3 w-3" />
-                            {patch.activatedHostname}
-                          </span>
-                        )}
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {new Date(patch.createdAt).toLocaleDateString("ar-IQ")}
+                        </span>
                         {patch.status === "used" && patch.usedAt && (
                           <span className="flex items-center gap-1">
                             <CheckCircle className="h-3 w-3 text-emerald-500" />
                             فُعّل {new Date(patch.usedAt).toLocaleDateString("ar-IQ")}
                           </span>
-                        )}
-                        {patch.status === "used" && patch.licenseId && (
-                          <Badge variant="outline" className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 no-default-hover-elevate no-default-active-elevate text-[10px]">مُرخّص</Badge>
                         )}
                       </div>
                     </div>
@@ -192,11 +182,11 @@ export default function Patches() {
                       <DropdownMenuContent align="end">
                         {patch.status === "pending" && (
                           <DropdownMenuItem
-                            onClick={() => copyCommand(patch.token)}
-                            data-testid={`action-copy-command-${patch.id}`}
+                            onClick={() => handleDownload(patch.token)}
+                            data-testid={`action-download-patch-${patch.id}`}
                           >
-                            <Terminal className="h-4 w-4 ml-2" />
-                            نسخ أمر التثبيت
+                            <Download className="h-4 w-4 ml-2" />
+                            تنزيل install.sh
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuItem
@@ -239,7 +229,7 @@ export default function Patches() {
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Package className="h-12 w-12 text-muted-foreground/50 mb-4" />
             <p className="text-muted-foreground text-sm">لا توجد باتشات</p>
-            <p className="text-muted-foreground/70 text-xs mt-1">أنشئ باتش وأعطِ الشخص أمر التثبيت لينفذه على سيرفره</p>
+            <p className="text-muted-foreground/70 text-xs mt-1">أنشئ باتش لإعطاء شخص ملف install.sh يشغّله على سيرفره</p>
             <Button variant="outline" className="mt-4" onClick={() => setShowCreate(true)}>
               <Plus className="h-4 w-4 ml-2" />
               إنشاء باتش جديد
@@ -258,7 +248,7 @@ export default function Patches() {
       <PatchDetailsDialog
         patch={showDetails}
         onClose={() => setShowDetails(null)}
-        onCopyCommand={copyCommand}
+        onDownload={handleDownload}
         onDelete={(id) => deleteMutation.mutate(id)}
         onCopyToken={copyToken}
         copied={copied}
@@ -275,7 +265,6 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
 }) {
   const [form, setForm] = useState({
     personName: "",
-    targetIp: "",
     maxUsers: "1000",
     maxSites: "1",
     durationDays: "30",
@@ -286,10 +275,9 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
     e.preventDefault();
     onSubmit({
       personName: form.personName,
-      targetIp: form.targetIp || null,
-      maxUsers: parseInt(form.maxUsers) || 1000,
-      maxSites: parseInt(form.maxSites) || 1,
-      durationDays: parseInt(form.durationDays) || 30,
+      maxUsers: parseInt(form.maxUsers),
+      maxSites: parseInt(form.maxSites),
+      durationDays: parseInt(form.durationDays),
       notes: form.notes || null,
     });
   };
@@ -299,7 +287,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
       <DialogContent className="max-w-lg" dir="rtl">
         <DialogHeader>
           <DialogTitle>إنشاء باتش جديد</DialogTitle>
-          <DialogDescription>أدخل بيانات الشخص ومعلومات الترخيص — عند تشغيل الباتش يُنشأ الترخيص تلقائياً</DialogDescription>
+          <DialogDescription>أنشئ ملف install.sh يتم إعطاؤه للشخص ليشغّله على سيرفره</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -312,52 +300,38 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
               data-testid="input-person-name"
             />
           </div>
-          <div className="space-y-2">
-            <Label>IP السيرفر (اختياري)</Label>
-            <Input
-              value={form.targetIp}
-              onChange={(e) => setForm({ ...form, targetIp: e.target.value })}
-              placeholder="مثال: 103.113.71.180"
-              dir="ltr"
-              data-testid="input-target-ip"
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label>المدة (أيام)</Label>
-              <Input
-                type="number"
-                value={form.durationDays}
-                onChange={(e) => setForm({ ...form, durationDays: e.target.value })}
-                min="1"
-                required
-                data-testid="input-duration-days"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>أقصى مستخدمين</Label>
+              <Label>الحد الأقصى للمستخدمين</Label>
               <Input
                 type="number"
                 value={form.maxUsers}
                 onChange={(e) => setForm({ ...form, maxUsers: e.target.value })}
-                min="1"
                 required
-                data-testid="input-max-users"
+                data-testid="input-patch-max-users"
               />
             </div>
             <div className="space-y-2">
-              <Label>أقصى مواقع</Label>
+              <Label>الحد الأقصى للمواقع</Label>
               <Input
                 type="number"
                 value={form.maxSites}
                 onChange={(e) => setForm({ ...form, maxSites: e.target.value })}
-                min="1"
                 required
-                data-testid="input-max-sites"
+                data-testid="input-patch-max-sites"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>مدة الترخيص (أيام)</Label>
+              <Input
+                type="number"
+                value={form.durationDays}
+                onChange={(e) => setForm({ ...form, durationDays: e.target.value })}
+                required
+                data-testid="input-patch-duration"
               />
             </div>
           </div>
-          <p className="text-muted-foreground/70 text-[11px]">العميل ينفذ أمر التثبيت على سيرفره → يتسجل HWID تلقائياً → يُنشأ الترخيص فوراً بالإعدادات أعلاه</p>
           <div className="space-y-2">
             <Label>ملاحظات (اختياري)</Label>
             <Textarea
@@ -378,10 +352,10 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
   );
 }
 
-function PatchDetailsDialog({ patch, onClose, onCopyCommand, onDelete, onCopyToken, copied }: {
+function PatchDetailsDialog({ patch, onClose, onDownload, onDelete, onCopyToken, copied }: {
   patch: PatchToken | null;
   onClose: () => void;
-  onCopyCommand: (token: string) => void;
+  onDownload: (token: string) => void;
   onDelete: (id: string) => void;
   onCopyToken: (token: string) => void;
   copied: boolean;
@@ -412,39 +386,21 @@ function PatchDetailsDialog({ patch, onClose, onCopyCommand, onDelete, onCopyTok
             <PatchStatusBadge status={live.status} />
           </div>
           <div className="flex justify-between items-center">
-            <span className="text-muted-foreground">المدة</span>
-            <span>{live.durationDays || 30} يوم</span>
+            <span className="text-muted-foreground">مدة الترخيص</span>
+            <span>{live.durationDays} يوم</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">أقصى مستخدمين</span>
-            <span>{live.maxUsers || 100}</span>
+            <span>{live.maxUsers.toLocaleString()}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">أقصى مواقع</span>
-            <span>{live.maxSites || 1}</span>
+            <span>{live.maxSites}</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-muted-foreground">تاريخ الإنشاء</span>
             <span>{new Date(live.createdAt).toLocaleString("ar-IQ")}</span>
           </div>
-          {live.activatedHostname && (
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground">اسم السيرفر</span>
-              <span>{live.activatedHostname}</span>
-            </div>
-          )}
-          {live.activatedIp && (
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground">عنوان IP</span>
-              <span dir="ltr" className="font-mono text-xs">{live.activatedIp}</span>
-            </div>
-          )}
-          {live.status === "used" && !live.licenseId && (
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground">الترخيص</span>
-              <Badge variant="outline" className="bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate">بانتظار إنشاء الترخيص</Badge>
-            </div>
-          )}
           {live.usedAt && (
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground">تاريخ التفعيل</span>
@@ -455,21 +411,6 @@ function PatchDetailsDialog({ patch, onClose, onCopyCommand, onDelete, onCopyTok
             <div className="flex justify-between items-start">
               <span className="text-muted-foreground">ملاحظات</span>
               <span className="text-left max-w-[200px]">{live.notes}</span>
-            </div>
-          )}
-
-          {live.status === "pending" && (
-            <div className="pt-2 border-t space-y-2">
-              <span className="text-muted-foreground text-xs">أمر التثبيت</span>
-              <div className="flex items-center gap-2">
-                <code className="text-xs bg-muted px-3 py-2 rounded font-mono flex-1 break-all select-all" dir="ltr" data-testid="text-install-command">
-                  curl -sL https://lic.tecn0link.net/api/patch-run/{live.token} | sudo bash
-                </code>
-                <Button size="icon" variant="ghost" onClick={() => onCopyCommand(live.token)} data-testid="button-copy-command">
-                  {copied ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                </Button>
-              </div>
-              <p className="text-muted-foreground/60 text-[11px]">يشغّل الشخص هذا الأمر على سيرفره كـ root - كل شي يتنفذ بالذاكرة</p>
             </div>
           )}
 
@@ -499,9 +440,9 @@ function PatchDetailsDialog({ patch, onClose, onCopyCommand, onDelete, onCopyTok
 
         <DialogFooter className="gap-2 flex-wrap">
           {live.status === "pending" && (
-            <Button onClick={() => onCopyCommand(live.token)} data-testid="button-copy-install-command">
-              <Terminal className="h-4 w-4 ml-2" />
-              نسخ أمر التثبيت
+            <Button onClick={() => onDownload(live.token)} data-testid="button-download-install">
+              <Download className="h-4 w-4 ml-2" />
+              تنزيل install.sh
             </Button>
           )}
           <Button

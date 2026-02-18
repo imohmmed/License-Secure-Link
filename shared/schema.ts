@@ -61,12 +61,6 @@ export const insertLicenseSchema = createInsertSchema(licenses).omit({
   updatedAt: true,
 });
 
-export const insertLicenseWithHwidSchema = createInsertSchema(licenses).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
 export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({
   id: true,
   createdAt: true,
@@ -92,12 +86,6 @@ export const patchTokens = pgTable("patch_tokens", {
   licenseId: varchar("license_id"),
   serverId: varchar("server_id"),
   notes: text("notes"),
-  targetIp: text("target_ip"),
-  activatedHostname: text("activated_hostname"),
-  activatedIp: text("activated_ip"),
-  hardwareId: text("hardware_id"),
-  hwidSalt: text("hwid_salt"),
-  rawHwidFingerprint: text("raw_hwid_fingerprint"),
   usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -107,10 +95,7 @@ export const insertPatchTokenSchema = createInsertSchema(patchTokens).omit({
   token: true,
   status: true,
   licenseId: true,
-  activatedHostname: true,
-  activatedIp: true,
-  hardwareId: true,
-  hwidSalt: true,
+  serverId: true,
   usedAt: true,
   createdAt: true,
 });
