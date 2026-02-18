@@ -330,11 +330,14 @@ export async function registerRoutes(
       patchData = patch;
       if (!body.clientId) body.clientId = patch.personName;
 
-      if (!body.serverId && patch.activatedIp) {
-        const allServers = await storage.getServers();
-        const matchingServer = allServers.find((s) => s.host === patch.activatedIp);
-        if (matchingServer) {
-          body.serverId = matchingServer.id;
+      if (!body.serverId) {
+        const matchIp = patch.activatedIp || patch.targetIp;
+        if (matchIp) {
+          const allServers = await storage.getServers();
+          const matchingServer = allServers.find((s) => s.host === matchIp);
+          if (matchingServer) {
+            body.serverId = matchingServer.id;
+          }
         }
       }
     }
@@ -349,40 +352,20 @@ export async function registerRoutes(
       return res.status(409).json({ message: "معرف الترخيص موجود مسبقاً" });
     }
 
-    {
-      let targetIp: string | null = null;
-      if (parsed.data.serverId) {
-        const server = await storage.getServer(parsed.data.serverId);
-        if (!server) {
-          return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
-        }
-        try {
-          targetIp = await resolveHostToIp(server.host);
-        } catch {
-          targetIp = server.host;
-        }
-      } else if (patchData?.activatedIp) {
-        targetIp = patchData.activatedIp;
+    if (parsed.data.serverId) {
+      const server = await storage.getServer(parsed.data.serverId);
+      if (!server) {
+        return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
       }
+    }
 
-      if (targetIp) {
-        const allServers = await storage.getServers();
-        const resolvedIps: string[] = [];
-        for (const s of allServers) {
-          try {
-            const ip = await resolveHostToIp(s.host);
-            if (ip === targetIp) resolvedIps.push(s.id);
-          } catch {
-            if (s.host === targetIp) resolvedIps.push(s.id);
-          }
-        }
-        const allLicenses = await storage.getLicenses();
-        const activeLicensesOnIp = allLicenses.filter(
-          l => l.serverId && resolvedIps.includes(l.serverId) && l.status === "active"
-        );
-        if (activeLicensesOnIp.length > 0) {
-          return res.status(409).json({ message: `يوجد ترخيص فعال على هذا الـ IP (${targetIp}) - احذف الترخيص القديم أولاً` });
-        }
+    if (patchData?.hardwareId) {
+      const allLicenses = await storage.getLicenses();
+      const activeLicenseWithHwid = allLicenses.find(
+        l => l.hardwareId === patchData.hardwareId && l.status === "active"
+      );
+      if (activeLicenseWithHwid) {
+        return res.status(409).json({ message: `يوجد ترخيص فعال بنفس الـ HWID (${patchData.hardwareId}) - احذف الترخيص القديم أولاً` });
       }
     }
 
@@ -1363,21 +1346,62 @@ echo "Installation completed successfully"
       return res.status(400).json({ message: parsed.error.message });
     }
 
+    const targetIp = parsed.data.targetIp;
+    let autoServerId: string | null = null;
+
+    if (targetIp) {
+      const allServers = await storage.getServers();
+      const existingServer = allServers.find((s) => s.host === targetIp);
+      if (existingServer) {
+        autoServerId = existingServer.id;
+      } else {
+        const newServer = await storage.createServer({
+          name: `${parsed.data.personName} - ${targetIp}`,
+          host: targetIp,
+          port: 22,
+          username: "root",
+          password: "changeme",
+        });
+        autoServerId = newServer.id;
+        await storage.createActivityLog({
+          action: "auto_create_server",
+          serverId: newServer.id,
+          details: JSON.stringify({
+            title: `تم إنشاء سيرفر تلقائي من الباتش: ${targetIp}`,
+            sections: [
+              { label: "السيرفر", value: `${newServer.name} (${targetIp})` },
+              { label: "ملاحظة", value: "تم إنشاؤه تلقائياً — عدّل كلمة مرور SSH من صفحة السيرفرات" },
+            ],
+          }),
+        });
+      }
+    }
+
     const token = crypto.randomBytes(24).toString("hex");
-    const patch = await storage.createPatchToken({
+    const patchCreateData: any = {
       ...parsed.data,
       token,
-    });
+    };
+    if (autoServerId) {
+      patchCreateData.serverId = autoServerId;
+    }
+    const patch = await storage.createPatchToken(patchCreateData);
+
+    const logSections: any[] = [
+      { label: "اسم الشخص", value: parsed.data.personName },
+      { label: "التوكن", value: token.substring(0, 16) + "...", mono: true },
+    ];
+    if (targetIp) {
+      logSections.push({ label: "IP السيرفر", value: targetIp });
+      logSections.push({ label: "السيرفر", value: autoServerId ? "مرتبط تلقائياً" : "غير متوفر" });
+    }
+    logSections.push({ label: "طريقة الاستخدام", value: "يرسل أمر التثبيت للشخص → ينفذه على سيرفره → يظهر بقائمة العملاء المتاحين → تنشئ له ترخيص" });
 
     await storage.createActivityLog({
       action: "create_patch",
       details: JSON.stringify({
         title: `تم إنشاء باتش لـ ${parsed.data.personName}`,
-        sections: [
-          { label: "اسم الشخص", value: parsed.data.personName },
-          { label: "التوكن", value: token.substring(0, 16) + "...", mono: true },
-          { label: "طريقة الاستخدام", value: "يرسل أمر التثبيت للشخص → ينفذه على سيرفره → يظهر بقائمة العملاء المتاحين → تنشئ له ترخيص" },
-        ],
+        sections: logSections,
       }),
     });
 

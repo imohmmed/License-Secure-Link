@@ -266,6 +266,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
 }) {
   const [form, setForm] = useState({
     personName: "",
+    targetIp: "",
     notes: "",
   });
 
@@ -273,6 +274,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
     e.preventDefault();
     onSubmit({
       personName: form.personName,
+      targetIp: form.targetIp || null,
       notes: form.notes || null,
     });
   };
@@ -282,7 +284,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
       <DialogContent className="max-w-lg" dir="rtl">
         <DialogHeader>
           <DialogTitle>إنشاء باتش جديد</DialogTitle>
-          <DialogDescription>أضف اسم الشخص وأرسله أمر التثبيت — بعد التثبيت يظهر تلقائياً بقائمة العملاء المتاحين لإنشاء ترخيص</DialogDescription>
+          <DialogDescription>أضف اسم الشخص والـ IP — النظام يضيف السيرفر تلقائياً ويربطه بالترخيص</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -293,6 +295,16 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
               placeholder="مثال: أحمد - العراق"
               required
               data-testid="input-person-name"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>IP السيرفر</Label>
+            <Input
+              value={form.targetIp}
+              onChange={(e) => setForm({ ...form, targetIp: e.target.value })}
+              placeholder="مثال: 103.113.71.180"
+              required
+              data-testid="input-target-ip"
             />
           </div>
           <div className="space-y-2">

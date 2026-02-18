@@ -454,7 +454,8 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
     setSelectedPatchId(patchId);
     const patch = availableClients.find((p) => p.id === patchId);
     if (patch) {
-      const matchingServer = servers.find((s) => s.host === patch.activatedIp);
+      const matchIp = patch.activatedIp || patch.targetIp;
+      const matchingServer = matchIp ? servers.find((s) => s.host === matchIp) : undefined;
       setForm((prev) => ({
         ...prev,
         clientId: patch.personName,
