@@ -408,8 +408,7 @@ export async function registerRoutes(
     });
 
     let deployResult = null;
-    const isFromPatch = !!patchData;
-    if (parsed.data.serverId && !isFromPatch) {
+    if (parsed.data.serverId) {
       const server = await storage.getServer(parsed.data.serverId);
       const licenseRecord = await storage.getLicense(license.id);
       const deployHwid = licenseRecord?.hardwareId || server?.hardwareId;

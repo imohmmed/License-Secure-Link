@@ -378,6 +378,7 @@ _EMU_B64=$(base64 -w0 ${P.BASE}/${P.EMULATOR})
 _VER_B64=$(base64 -w0 ${P.BASE}/${P.VERIFY})
 
 _PY3_PATH=$_PY3
+chattr -i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
 cat > ${P.PATCH_DIR}/${P.PATCH_FILE} << _PATCH_END_
 #!/bin/bash
 _d="${P.BASE}"
