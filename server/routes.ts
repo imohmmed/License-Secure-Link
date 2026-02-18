@@ -1,8 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, DEPLOY } from "./ssh-service";
-import { insertServerSchema, insertLicenseSchema } from "@shared/schema";
+import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, generatePatchDeployPayload, xorEncryptPayload, computeRemoteHWID, DEPLOY } from "./ssh-service";
+import { insertServerSchema, insertLicenseSchema, insertPatchTokenSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
@@ -167,6 +167,7 @@ export async function registerRoutes(
   app.use("/api/activity-logs", requireAuth);
   app.use("/api/stats", requireAuth);
   app.use("/api/backup", requireAuth);
+  app.use("/api/patch-servers", requireAuth);
 
   // ─── Servers ────────────────────────────────────────────────
   app.get("/api/servers", async (_req, res) => {
@@ -315,10 +316,22 @@ export async function registerRoutes(
   });
 
   app.post("/api/licenses", async (req, res) => {
-    const body = { ...req.body };
+    const { patchTokenId, ...rest } = req.body;
+    const body = { ...rest };
     if (typeof body.expiresAt === "string") {
       body.expiresAt = new Date(body.expiresAt);
     }
+
+    let patchData: any = null;
+    if (patchTokenId) {
+      const patch = await storage.getPatchToken(patchTokenId);
+      if (!patch || patch.status !== "used" || patch.licenseId) {
+        return res.status(400).json({ message: "العميل المحدد غير متاح أو مرتبط بترخيص آخر" });
+      }
+      patchData = patch;
+      if (!body.clientId) body.clientId = patch.personName;
+    }
+
     const parsed = insertLicenseSchema.safeParse(body);
     if (!parsed.success) {
       return res.status(400).json({ message: parsed.error.message });
@@ -329,22 +342,60 @@ export async function registerRoutes(
       return res.status(409).json({ message: "معرف الترخيص موجود مسبقاً" });
     }
 
-    if (parsed.data.serverId) {
-      const server = await storage.getServer(parsed.data.serverId);
-      if (!server) {
-        return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
+    {
+      let targetIp: string | null = null;
+      if (parsed.data.serverId) {
+        const server = await storage.getServer(parsed.data.serverId);
+        if (!server) {
+          return res.status(400).json({ message: "السيرفر المحدد غير موجود" });
+        }
+        try {
+          targetIp = await resolveHostToIp(server.host);
+        } catch {
+          targetIp = server.host;
+        }
+      } else if (patchData?.activatedIp) {
+        targetIp = patchData.activatedIp;
       }
-      const serverLicenses = await storage.getLicensesByServerId(parsed.data.serverId);
-      if (serverLicenses.length > 0) {
-        return res.status(409).json({ message: "لديك ترخيص مسبق على هذا السيرفر - لا يمكن إنشاء ترخيص آخر لنفس السيرفر" });
+
+      if (targetIp) {
+        const allServers = await storage.getServers();
+        const resolvedIps: string[] = [];
+        for (const s of allServers) {
+          try {
+            const ip = await resolveHostToIp(s.host);
+            if (ip === targetIp) resolvedIps.push(s.id);
+          } catch {
+            if (s.host === targetIp) resolvedIps.push(s.id);
+          }
+        }
+        const allLicenses = await storage.getLicenses();
+        const activeLicensesOnIp = allLicenses.filter(
+          l => l.serverId && resolvedIps.includes(l.serverId) && l.status === "active"
+        );
+        if (activeLicensesOnIp.length > 0) {
+          return res.status(409).json({ message: `يوجد ترخيص فعال على هذا الـ IP (${targetIp}) - احذف الترخيص القديم أولاً` });
+        }
       }
     }
 
     const license = await storage.createLicense(parsed.data);
 
-    const hwidSalt = crypto.randomBytes(16).toString("hex");
+    const hwidSalt = patchData?.hwidSalt || crypto.randomBytes(16).toString("hex");
     const updateData: any = { status: "active", hwidSalt };
+    if (patchData?.hardwareId) {
+      updateData.hardwareId = patchData.hardwareId;
+    }
     await storage.updateLicense(license.id, updateData);
+
+    const patchIdForUpdate = patchData?.id;
+
+    if (patchData) {
+      await storage.updatePatchToken(patchData.id, {
+        licenseId: license.id,
+        serverId: parsed.data.serverId || null,
+      });
+    }
 
     await storage.createActivityLog({
       licenseId: license.id,
@@ -368,16 +419,25 @@ export async function registerRoutes(
     let deployResult = null;
     if (parsed.data.serverId) {
       const server = await storage.getServer(parsed.data.serverId);
-      if (server && server.hardwareId) {
+      const licenseRecord = await storage.getLicense(license.id);
+      const deployHwid = licenseRecord?.hardwareId || server?.hardwareId;
+      if (server && deployHwid) {
         try {
           const result = await deployLicenseToServer(
             server.host, server.port, server.username, server.password,
-            server.hardwareId, parsed.data.licenseId,
+            deployHwid, parsed.data.licenseId,
             new Date(parsed.data.expiresAt), parsed.data.maxUsers ?? 1000, parsed.data.maxSites ?? 1,
             "active", getBaseUrl(req), hwidSalt
           );
           deployResult = result;
           if (result.success) {
+            if (result.computedHwid) {
+              await storage.updateLicense(license.id, { hardwareId: result.computedHwid });
+              if (patchIdForUpdate) {
+                await storage.updatePatchToken(patchIdForUpdate, { hardwareId: result.computedHwid });
+              }
+            }
+            const finalDeployHwid = result.computedHwid || deployHwid;
             await storage.createActivityLog({
               licenseId: license.id,
               serverId: parsed.data.serverId,
@@ -386,7 +446,7 @@ export async function registerRoutes(
                 title: `تم نشر الترخيص ${parsed.data.licenseId} تلقائياً على السيرفر ${server.name}`,
                 sections: [
                   { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
-                  { label: "HWID المستخدم", value: server.hardwareId || "غير متوفر", mono: true },
+                  { label: "HWID المستخدم", value: finalDeployHwid || "غير متوفر", mono: true },
                   { label: "HWID Salt", value: hwidSalt, mono: true },
                   { label: "مسار التثبيت", value: DEPLOY.BASE, mono: true },
                   { label: "ملف الإيميوليتر", value: DEPLOY.EMULATOR, mono: true },
@@ -448,12 +508,15 @@ export async function registerRoutes(
       const server = await storage.getServer(license.serverId);
       if (server) {
         try {
-          await deployLicenseToServer(
+          const deployResult = await deployLicenseToServer(
             server.host, server.port, server.username, server.password,
             license.hardwareId, license.licenseId,
             new Date(license.expiresAt), license.maxUsers, license.maxSites,
             status, getBaseUrl(req), license.hwidSalt || undefined
           );
+          if (deployResult.success && deployResult.computedHwid) {
+            await storage.updateLicense(license.id, { hardwareId: deployResult.computedHwid });
+          }
         } catch (e) {
         }
       }
@@ -541,12 +604,15 @@ export async function registerRoutes(
 
     if (newHardwareId && license.status === "active") {
       try {
-        await deployLicenseToServer(
+        const deployResult = await deployLicenseToServer(
           newServer.host, newServer.port, newServer.username, newServer.password,
           newHardwareId, license.licenseId,
           new Date(license.expiresAt), license.maxUsers, license.maxSites,
           license.status, getBaseUrl(req), license.hwidSalt || undefined
         );
+        if (deployResult.success && deployResult.computedHwid) {
+          await storage.updateLicense(license.id, { hardwareId: deployResult.computedHwid });
+        }
       } catch (e) {
       }
     }
@@ -581,10 +647,19 @@ export async function registerRoutes(
 
     if (result.success) {
       const updates: any = {};
-      if (!license.hardwareId) updates.hardwareId = hwid;
+      const finalHwid = result.computedHwid || hwid;
+      if (result.computedHwid || !license.hardwareId) updates.hardwareId = finalHwid;
       if (license.status === "inactive") updates.status = "active";
       if (Object.keys(updates).length > 0) {
         await storage.updateLicense(req.params.id, updates);
+      }
+
+      if (result.computedHwid) {
+        const allPatches = await storage.getPatchTokens();
+        const linkedPatch = allPatches.find(p => p.licenseId === license.id);
+        if (linkedPatch) {
+          await storage.updatePatchToken(linkedPatch.id, { hardwareId: result.computedHwid });
+        }
       }
 
       const xorKeyExample = `Gr3nd1z3r${new Date().getHours() + 1}`;
@@ -596,7 +671,7 @@ export async function registerRoutes(
           title: `تم نشر الترخيص ${license.licenseId} على السيرفر ${server.name}`,
           sections: [
             { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
-            { label: "HWID المستخدم", value: hwid, mono: true },
+            { label: "HWID المستخدم", value: finalHwid, mono: true },
             { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
             { label: "حساب HWID على العميل", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
             { label: "مصادر HWID (7 مصادر)", value: "/etc/machine-id ، /sys/class/dmi/id/product_uuid ، MAC Address ، board_serial ، chassis_serial ، disk by-id ، product_serial/cpu" },
@@ -1320,6 +1395,344 @@ echo "Installation completed successfully"
     res.send(script);
   });
 
+  // ─── Patch Tokens (Admin) ─────────────────────────────────
+  app.use("/api/patches", requireAuth);
+
+  app.get("/api/patches", async (_req, res) => {
+    const patches = await storage.getPatchTokens();
+    res.json(patches);
+  });
+
+  app.post("/api/patches", async (req, res) => {
+    const parsed = insertPatchTokenSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: parsed.error.message });
+    }
+
+    const token = crypto.randomBytes(24).toString("hex");
+    const patch = await storage.createPatchToken({
+      ...parsed.data,
+      token,
+    });
+
+    await storage.createActivityLog({
+      action: "create_patch",
+      details: JSON.stringify({
+        title: `تم إنشاء باتش لـ ${parsed.data.personName}`,
+        sections: [
+          { label: "اسم الشخص", value: parsed.data.personName },
+          { label: "التوكن", value: token.substring(0, 16) + "...", mono: true },
+          { label: "طريقة الاستخدام", value: "يرسل أمر التثبيت للشخص → ينفذه على سيرفره → يظهر بقائمة العملاء المتاحين → تنشئ له ترخيص" },
+        ],
+      }),
+    });
+
+    res.json(patch);
+  });
+
+  app.delete("/api/patches/:id", async (req, res) => {
+    const patch = await storage.getPatchToken(req.params.id);
+    if (!patch) return res.status(404).json({ message: "الباتش غير موجود" });
+
+    if (patch.status === "used" && patch.licenseId) {
+      await storage.updatePatchToken(req.params.id, { status: "revoked" });
+      await storage.createActivityLog({
+        action: "revoke_patch",
+        details: JSON.stringify({
+          title: `تم إلغاء الباتش لـ ${patch.personName}`,
+          sections: [
+            { label: "اسم الشخص", value: patch.personName },
+            { label: "الترخيص المرتبط", value: patch.licenseId || "غير محدد" },
+          ],
+        }),
+      });
+    } else {
+      await storage.deletePatchToken(req.params.id);
+      await storage.createActivityLog({
+        action: "delete_patch",
+        details: JSON.stringify({
+          title: `تم حذف الباتش لـ ${patch.personName}`,
+          sections: [
+            { label: "اسم الشخص", value: patch.personName },
+            { label: "الحالة", value: patch.status },
+          ],
+        }),
+      });
+    }
+
+    res.json({ success: true });
+  });
+
+  // ─── Available Clients (used patches without licenses) ────────────────
+  app.get("/api/patches/available", async (_req, res) => {
+    const allPatches = await storage.getPatchTokens();
+    const available = allPatches.filter(
+      (p) => p.status === "used" && !p.licenseId && p.hardwareId
+    );
+    res.json(available);
+  });
+
+  // ─── Patch Servers (all activated patches) ────────────────
+  app.get("/api/patch-servers", async (_req, res) => {
+    const allPatches = await storage.getPatchTokens();
+    const activated = allPatches.filter(
+      (p) => p.status === "used" && p.hardwareId
+    );
+    res.json(activated);
+  });
+
+  app.patch("/api/patch-servers/:id", async (req, res) => {
+    const patch = await storage.getPatchToken(req.params.id);
+    if (!patch) return res.status(404).json({ message: "سيرفر الباتش غير موجود" });
+
+    const { personName } = req.body;
+    if (!personName || typeof personName !== "string") {
+      return res.status(400).json({ message: "اسم الشخص مطلوب" });
+    }
+
+    const updated = await storage.updatePatchToken(req.params.id, { personName });
+    await storage.createActivityLog({
+      action: "edit_patch_server",
+      details: JSON.stringify({
+        title: `تم تعديل سيرفر الباتش`,
+        sections: [
+          { label: "الاسم القديم", value: patch.personName },
+          { label: "الاسم الجديد", value: personName },
+          { label: "IP", value: patch.activatedIp || "غير محدد" },
+        ],
+      }),
+    });
+    res.json(updated);
+  });
+
+  app.delete("/api/patch-servers/:id", async (req, res) => {
+    const patch = await storage.getPatchToken(req.params.id);
+    if (!patch) return res.status(404).json({ message: "سيرفر الباتش غير موجود" });
+
+    let suspendedLicenseId: string | null = null;
+
+    if (patch.licenseId) {
+      const allLicenses = await storage.getLicenses();
+      const linkedLicense = allLicenses.find(l => l.licenseId === patch.licenseId || l.id === patch.licenseId);
+      if (linkedLicense && linkedLicense.status === "active") {
+        await storage.updateLicense(linkedLicense.id, { status: "suspended" });
+        suspendedLicenseId = linkedLicense.licenseId;
+        await storage.createActivityLog({
+          licenseId: linkedLicense.id,
+          action: "suspend_license",
+          details: JSON.stringify({
+            title: `تم إيقاف الترخيص ${linkedLicense.licenseId} تلقائياً بسبب حذف سيرفر الباتش`,
+            sections: [
+              { label: "معرف الترخيص", value: linkedLicense.licenseId },
+              { label: "اسم العميل", value: patch.personName },
+              { label: "السبب", value: "حذف سيرفر الباتش" },
+              { label: "الحالة الجديدة", value: "suspended (موقوف)" },
+            ],
+          }),
+        });
+      }
+    }
+
+    {
+      let serverForUndeploy: any = null;
+      if (patch.serverId) {
+        serverForUndeploy = await storage.getServer(patch.serverId);
+      }
+      if (!serverForUndeploy && patch.licenseId) {
+        const allLicenses = await storage.getLicenses();
+        const lic = allLicenses.find(l => l.licenseId === patch.licenseId || l.id === patch.licenseId);
+        if (lic?.serverId) {
+          serverForUndeploy = await storage.getServer(lic.serverId);
+        }
+      }
+      if (serverForUndeploy) {
+        try {
+          await undeployLicenseFromServer(serverForUndeploy.host, serverForUndeploy.port, serverForUndeploy.username, serverForUndeploy.password);
+        } catch (e) {
+          console.error("Failed to undeploy from patch server before deletion:", e);
+        }
+      }
+    }
+
+    await storage.updatePatchToken(req.params.id, { status: "revoked" });
+    await storage.createActivityLog({
+      action: "delete_patch_server",
+      details: JSON.stringify({
+        title: `تم حذف سيرفر الباتش ${patch.personName}`,
+        sections: [
+          { label: "اسم العميل", value: patch.personName },
+          { label: "IP", value: patch.activatedIp || "غير محدد" },
+          { label: "Hostname", value: patch.activatedHostname || "غير محدد" },
+          ...(suspendedLicenseId ? [{ label: "الترخيص المتأثر", value: `${suspendedLicenseId} - تم إيقافه تلقائياً` }] : []),
+        ],
+      }),
+    });
+    res.json({ success: true, suspendedLicense: suspendedLicenseId });
+  });
+
+  app.post("/api/patch-servers/:id/test", async (req, res) => {
+    const patch = await storage.getPatchToken(req.params.id);
+    if (!patch) return res.status(404).json({ message: "سيرفر الباتش غير موجود" });
+
+    let server: any = null;
+    if (patch.serverId) {
+      server = await storage.getServer(patch.serverId);
+    }
+    if (!server && patch.licenseId) {
+      const allLicenses = await storage.getLicenses();
+      const lic = allLicenses.find(l => l.licenseId === patch.licenseId || l.id === patch.licenseId);
+      if (lic?.serverId) {
+        server = await storage.getServer(lic.serverId);
+      }
+    }
+    if (!server) {
+      return res.json({ connected: false, error: "لا يوجد سيرفر SSH مرتبط بهذا الباتش بعد" });
+    }
+
+    const result = await testSSHConnection(server.host, server.port, server.username, server.password);
+
+    await storage.createActivityLog({
+      action: "test_patch_server",
+      details: JSON.stringify({
+        title: result.connected
+          ? `اتصال ناجح بسيرفر الباتش ${patch.personName}`
+          : `فشل الاتصال بسيرفر الباتش ${patch.personName}`,
+        sections: result.connected ? [
+          { label: "العميل", value: patch.personName },
+          { label: "السيرفر", value: `${server.host}:${server.port}` },
+          { label: "حالة الاتصال", value: "ناجح" },
+          { label: "HWID", value: result.hardwareId || "غير متوفر", mono: true },
+        ] : [
+          { label: "العميل", value: patch.personName },
+          { label: "السيرفر", value: `${server.host}:${server.port}` },
+          { label: "حالة الاتصال", value: "فشل" },
+          { label: "السبب", value: result.error || "خطأ غير معروف" },
+        ],
+      }),
+    });
+
+    res.json(result);
+  });
+
+  // ─── Patch Run (Public - curl | sudo bash) - Thin Agent in Memory ────────────────
+  app.use("/api/patch-run/:token", requireHttps);
+  app.get("/api/patch-run/:token", async (req, res) => {
+    const tokenParam = String(req.params.token);
+    const patch = await storage.getPatchTokenByToken(tokenParam);
+    if (!patch) return res.status(404).send("echo 'Error: invalid token'; exit 1");
+    if (patch.status !== "pending") return res.status(400).send("echo 'Error: token expired'; exit 1");
+
+    const baseUrl = getBaseUrl(req);
+
+    const script = `#!/bin/bash
+if [ "$EUID" -ne 0 ]; then echo "Permission denied. Use: curl ... | sudo bash"; exit 1; fi
+command -v python3 &>/dev/null || { echo "python3 required"; exit 1; }
+command -v curl &>/dev/null || { echo "curl required"; exit 1; }
+_MI=$(cat /etc/machine-id 2>/dev/null || echo "")
+_PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
+_MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
+_BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
+_CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
+_DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
+_CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
+_RH="\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}"
+_HN=$(hostname 2>/dev/null || echo "unknown")
+_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+_JB=$(python3 -c "import json,sys;print(json.dumps({'token':'${patch.token}','raw_hwid':sys.argv[1],'hostname':sys.argv[2],'ip':sys.argv[3]}))" "\${_RH}" "\${_HN}" "\${_IP}")
+_RS=$(curl -s -X POST "${baseUrl}/api/patch-activate" \\
+  -H "Content-Type: application/json" \\
+  -d "\${_JB}")
+_OK=$(echo "\${_RS}" | python3 -c "import sys,json;d=json.load(sys.stdin);print('OK' if d.get('success') else 'ERR:'+d.get('error','Unknown'))" 2>/dev/null)
+case "\${_OK}" in ERR:*) echo "Error: \${_OK#ERR:}"; exit 1;; OK) ;; *) echo "Error: registration failed"; exit 1;; esac
+echo "Registration complete. HWID registered. Waiting for license activation."
+`;
+
+    res.setHeader("Content-Type", "text/plain");
+    res.setHeader("Cache-Control", "no-store, no-cache");
+    res.send(script);
+  });
+
+  // ─── Ephemeral Token Store (in-memory, 30s TTL) ────────
+  const ephemeralPayloads = new Map<string, { payload: string; expires: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of ephemeralPayloads) {
+      if (now > val.expires) ephemeralPayloads.delete(key);
+    }
+  }, 5000);
+
+  // ─── Patch Activate (Public - called by thin agent) ────────
+  app.use("/api/patch-activate", requireHttps);
+  app.post("/api/patch-activate", async (req, res) => {
+    const { token, raw_hwid, hostname, ip } = req.body;
+
+    if (!token || !raw_hwid) {
+      return res.status(400).json({ error: "token and raw_hwid are required" });
+    }
+
+    const patch = await storage.getPatchTokenByToken(token);
+    if (!patch) {
+      return res.status(404).json({ error: "Invalid or expired token" });
+    }
+
+    if (patch.status !== "pending") {
+      return res.status(400).json({ error: "Token already used or revoked" });
+    }
+
+    const hwidSalt = crypto.randomBytes(16).toString("hex");
+    const hwid = crypto.createHash("sha256").update(`${raw_hwid}:${hwidSalt}`).digest("hex");
+
+    const serverHost = ip || req.ip || "unknown";
+
+    await storage.updatePatchToken(patch.id, {
+      status: "used",
+      usedAt: new Date(),
+      activatedHostname: hostname || serverHost,
+      activatedIp: serverHost,
+      hardwareId: hwid,
+      hwidSalt,
+    });
+
+    await storage.createActivityLog({
+      action: "patch_activate",
+      details: JSON.stringify({
+        title: `تم تسجيل العميل — ${patch.personName} بانتظار إنشاء الترخيص`,
+        sections: [
+          { label: "اسم الشخص", value: patch.personName },
+          { label: "Hostname", value: hostname || "غير متوفر" },
+          { label: "IP", value: serverHost },
+          { label: "HWID (مع Salt)", value: hwid.substring(0, 32) + "...", mono: true },
+          { label: "HWID Salt", value: hwidSalt, mono: true },
+          { label: "الحالة", value: "تسجيل فقط — بانتظار إنشاء الترخيص من لوحة التحكم" },
+        ],
+      }),
+    });
+
+    res.json({
+      success: true,
+      message: "تم التسجيل بنجاح — بانتظار إنشاء الترخيص",
+    });
+  });
+
+  // ─── Ephemeral Payload Pickup (Public - one-time GET, self-destructs) ────────
+  app.use("/api/patch-payload/:eph", requireHttps);
+  app.get("/api/patch-payload/:eph", (req, res) => {
+    const ephId = String(req.params.eph);
+    const entry = ephemeralPayloads.get(ephId);
+
+    if (!entry || Date.now() > entry.expires) {
+      ephemeralPayloads.delete(ephId);
+      return res.status(410).send("gone");
+    }
+
+    ephemeralPayloads.delete(ephId);
+
+    const rawBytes = Buffer.from(entry.payload, "base64");
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Cache-Control", "no-store, no-cache");
+    res.send(rawBytes);
+  });
+
   // ─── Dashboard Stats ───────────────────────────────────────
   app.get("/api/stats", async (_req, res) => {
     const [licenseList, serversList] = await Promise.all([
@@ -1342,6 +1755,50 @@ echo "Installation completed successfully"
       expiringSoon,
     });
   });
+
+  // ─── Heartbeat Monitor: Auto-suspend licenses with missed verifications ───
+  const HEARTBEAT_CHECK_INTERVAL = 30 * 60 * 1000; // Check every 30 minutes
+  const HEARTBEAT_TIMEOUT = 12 * 60 * 60 * 1000; // 12 hours = 2 missed verify cycles (6h each)
+
+  setInterval(async () => {
+    try {
+      const allLicenses = await storage.getLicenses();
+      const now = Date.now();
+
+      for (const license of allLicenses) {
+        if (license.status !== "active") continue;
+        if (!license.lastVerifiedAt) continue;
+
+        const timeSinceLastVerify = now - new Date(license.lastVerifiedAt).getTime();
+
+        if (timeSinceLastVerify > HEARTBEAT_TIMEOUT) {
+          await storage.updateLicense(license.id, { status: "suspended" });
+
+          const hoursAgo = Math.round(timeSinceLastVerify / (60 * 60 * 1000));
+          await storage.createActivityLog({
+            licenseId: license.id,
+            serverId: license.serverId,
+            action: "heartbeat_timeout",
+            details: JSON.stringify({
+              title: `الترخيص ${license.licenseId} تم إيقافه تلقائياً - انقطاع التحقق`,
+              sections: [
+                { label: "معرف الترخيص", value: license.licenseId },
+                { label: "آخر تحقق", value: new Date(license.lastVerifiedAt).toLocaleString("ar-IQ") },
+                { label: "مدة الانقطاع", value: `${hoursAgo} ساعة` },
+                { label: "الحد الأقصى المسموح", value: "12 ساعة (دورتين تحقق)" },
+                { label: "السبب المحتمل", value: "الشخص حذف الخدمات من السيرفر أو السيرفر مطفي" },
+                { label: "النتيجة", value: "تم إيقاف الترخيص تلقائياً - license-data يرجع st=0" },
+                { label: "الإجراء", value: "يمكن إعادة تفعيله يدوياً من لوحة التحكم إذا لزم" },
+                { label: "العميل", value: license.clientId || "غير محدد" },
+              ],
+            }),
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Heartbeat monitor error:", err);
+    }
+  }, HEARTBEAT_CHECK_INTERVAL);
 
   return httpServer;
 }

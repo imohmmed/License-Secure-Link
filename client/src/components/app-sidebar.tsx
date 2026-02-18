@@ -1,4 +1,4 @@
-import { LayoutDashboard, Key, Server, ScrollText, Shield, Settings, LogOut } from "lucide-react";
+import { LayoutDashboard, Key, Server, ScrollText, Shield, Settings, LogOut, Package, MonitorSmartphone } from "lucide-react";
 import { useLocation, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -20,6 +20,8 @@ const menuItems = [
   { title: "لوحة التحكم", url: "/", icon: LayoutDashboard },
   { title: "التراخيص", url: "/licenses", icon: Key },
   { title: "السيرفرات", url: "/servers", icon: Server },
+  { title: "سيرفرات باتشات", url: "/patch-servers", icon: MonitorSmartphone },
+  { title: "الباتشات", url: "/patches", icon: Package },
   { title: "سجل النشاط", url: "/activity", icon: ScrollText },
   { title: "الإعدادات", url: "/settings", icon: Settings },
 ];

@@ -33,7 +33,6 @@ import {
   Trash2,
   Edit,
   Terminal,
-  Globe,
   Hash,
   User,
 } from "lucide-react";
