@@ -182,19 +182,19 @@ export default function PatchServers() {
                     <span className="flex items-center gap-1.5 text-muted-foreground">
                       <Hash className="h-3 w-3" /> البورت
                     </span>
-                    <span className="font-mono">22</span>
+                    <span className="font-mono text-foreground">22</span>
                   </div>
                   <div className="flex items-center justify-between gap-2 text-xs">
                     <span className="flex items-center gap-1.5 text-muted-foreground">
                       <User className="h-3 w-3" /> Hostname
                     </span>
-                    <span className="font-mono" data-testid={`text-patch-hostname-${patch.id}`}>{patch.activatedHostname || "—"}</span>
+                    <span className="font-mono text-foreground" data-testid={`text-patch-hostname-${patch.id}`}>{patch.activatedHostname || "—"}</span>
                   </div>
                   <div className="flex items-center justify-between gap-2 text-xs">
                     <span className="flex items-center gap-1.5 text-muted-foreground">
                       <Terminal className="h-3 w-3" /> Hardware ID
                     </span>
-                    <span className="font-mono text-xs" data-testid={`text-patch-hwid-${patch.id}`}>
+                    <span className="font-mono text-xs text-foreground" data-testid={`text-patch-hwid-${patch.id}`}>
                       {patch.hardwareId || "غير محدد"}
                     </span>
                   </div>
