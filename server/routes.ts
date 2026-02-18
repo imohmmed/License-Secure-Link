@@ -689,21 +689,19 @@ export async function registerRoutes(
     const license = await storage.getLicense(req.params.id);
     if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });
 
-    await storage.updateLicense(req.params.id, { status: "suspended" });
     await storage.createActivityLog({
-      licenseId: license.id,
       serverId: license.serverId,
-      action: "suspend_license",
+      action: "delete_license",
       details: JSON.stringify({
-        title: `تم تعطيل الترخيص ${license.licenseId}`,
+        title: `تم حذف الترخيص ${license.licenseId} بالكامل`,
         sections: [
           { label: "معرف الترخيص", value: license.licenseId },
-          { label: "الحالة الجديدة", value: "suspended (موقوف)" },
-          { label: "الملفات على السيرفر", value: "باقية - الإيميوليتر يعمل بوضع disabled (st=0)" },
-          { label: "التأثير", value: "verify يرجع valid:true + suspended → SAS4 يشتغل بوضع القراءة فقط" },
+          { label: "HWID", value: license.hardwareId || "غير محدد" },
+          { label: "الحالة قبل الحذف", value: license.status },
         ],
       }),
     });
+    await storage.deleteLicense(license.id);
     res.json({ success: true });
   });
 

@@ -50,6 +50,7 @@ import {
   Edit,
   Clock,
   Download,
+  Trash2,
 } from "lucide-react";
 import type { License, Server as ServerType, PatchToken } from "@shared/schema";
 
@@ -163,7 +164,7 @@ export default function Licenses() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/licenses"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activity-logs"] });
-      toast({ title: "تم تعطيل الترخيص" });
+      toast({ title: "تم حذف الترخيص بالكامل" });
     },
     onError: (err: Error) => {
       toast({ title: "خطأ", description: err.message, variant: "destructive" });
@@ -365,6 +366,19 @@ export default function Licenses() {
                         >
                           <Download className="h-4 w-4 ml-2" />
                           تنزيل install.sh
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => {
+                            if (window.confirm(`هل أنت متأكد من حذف الترخيص ${license.licenseId} بالكامل؟ لا يمكن التراجع عن هذا الإجراء.`)) {
+                              deleteMutation.mutate(license.id);
+                            }
+                          }}
+                          data-testid={`action-delete-${license.id}`}
+                        >
+                          <Trash2 className="h-4 w-4 ml-2" />
+                          حذف بالكامل
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
