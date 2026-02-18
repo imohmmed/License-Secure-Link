@@ -29,16 +29,6 @@ A centralized license management system (License Authority) for SAS4 software. U
 - Last verification time tracking per license
 - Backup/restore (export/import JSON of servers, licenses, activity logs)
 - HTTPS-only enforcement on all public API endpoints
-- **Patch System**: Generate install.sh scripts for remote clients
-  - Admin creates a "patch" with person's name, duration, user/site limits
-  - System generates unique token + downloadable install.sh
-  - Client runs install.sh on their server → collects HWID → auto-registers server + license
-  - License tagged with person's name (appears in licenses page)
-  - Admin can suspend/revoke patch licenses normally
-  - Install script is obfuscated (base64 + eval wrapper, not readable plaintext)
-  - Token is single-use: once activated, cannot be reused
-  - **Heartbeat monitor**: Active licenses auto-suspend after 12 hours without verification (2 missed cycles)
-  - If client deletes services from server → verification stops → license auto-suspends
 
 ## Project Structure
 ```
@@ -47,7 +37,6 @@ client/src/
     dashboard.tsx      - Main dashboard with stats
     licenses.tsx       - License management page (create, edit, deploy, provision)
     servers.tsx        - Server management page
-    patches.tsx        - Patch management page (create, download, manage)
     activity.tsx       - Activity log page
     settings.tsx       - Settings page (credentials, backup/restore)
     login.tsx          - Login page
@@ -66,14 +55,13 @@ server/
   sas4-service.ts     - SAS4 XOR encryption/decryption service
 
 shared/
-  schema.ts           - Drizzle schemas (servers, licenses, activity_logs, users, patch_tokens)
+  schema.ts           - Drizzle schemas (servers, licenses, activity_logs, users)
 ```
 
 ## Database Schema
 - **servers**: SSH connection details (host, port, username, password, hardwareId)
 - **licenses**: License records (licenseId, serverId, hardwareId, status, expiresAt, maxUsers, maxSites, signature, lastVerifiedAt)
 - **activity_logs**: Audit trail for all operations
-- **patch_tokens**: Patch install tokens (token, personName, maxUsers, maxSites, durationDays, status, licenseId, serverId)
 - **users**: Admin users (username, hashed password)
 - **session**: Express session store (auto-created by connect-pg-simple)
 
@@ -102,18 +90,11 @@ shared/
 - `GET /api/backup/export` - Export backup (JSON download)
 - `POST /api/backup/import` - Import backup (JSON upload)
 
-### Patch Routes (Protected)
-- `GET /api/patches` - List all patches
-- `POST /api/patches` - Create new patch (personName, maxUsers, maxSites, durationDays, notes)
-- `DELETE /api/patches/:id` - Delete/revoke patch
-- `GET /api/patch-script/:token` - Download install.sh for a patch token
-
 ### Public API (Client Servers - HTTPS only)
 - `POST /api/provision` - Provision license (sends HWID, gets SAS4 encrypted blob)
 - `POST /api/verify` - Periodic verification (sends license_id + HWID, checks status)
 - `GET /api/license-blob/:licenseId` - Get XOR-encrypted SAS4 license blob
 - `GET /api/provision-script/:licenseId` - Download SAS4 activator script
-- `POST /api/patch-activate` - Activate patch token (called by install.sh from remote server)
 
 ## Authentication
 - Default admin: admin/admin (auto-created on first run)

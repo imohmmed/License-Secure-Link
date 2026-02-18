@@ -5,7 +5,6 @@ import {
   licenses,
   activityLogs,
   users,
-  patchTokens,
   type Server,
   type InsertServer,
   type License,
@@ -14,8 +13,6 @@ import {
   type InsertActivityLog,
   type User,
   type InsertUser,
-  type PatchToken,
-  type InsertPatchToken,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -35,13 +32,6 @@ export interface IStorage {
 
   getActivityLogs(): Promise<ActivityLog[]>;
   createActivityLog(data: InsertActivityLog): Promise<ActivityLog>;
-
-  getPatchTokens(): Promise<PatchToken[]>;
-  getPatchToken(id: string): Promise<PatchToken | undefined>;
-  getPatchTokenByToken(token: string): Promise<PatchToken | undefined>;
-  createPatchToken(data: InsertPatchToken & { token: string }): Promise<PatchToken>;
-  updatePatchToken(id: string, data: Partial<PatchToken>): Promise<PatchToken | undefined>;
-  deletePatchToken(id: string): Promise<void>;
 
   getUserByUsername(username: string): Promise<User | undefined>;
   getUser(id: string): Promise<User | undefined>;
@@ -116,34 +106,6 @@ export class DatabaseStorage implements IStorage {
   async createActivityLog(data: InsertActivityLog): Promise<ActivityLog> {
     const [log] = await db.insert(activityLogs).values(data).returning();
     return log;
-  }
-
-  async getPatchTokens(): Promise<PatchToken[]> {
-    return db.select().from(patchTokens).orderBy(desc(patchTokens.createdAt));
-  }
-
-  async getPatchToken(id: string): Promise<PatchToken | undefined> {
-    const [token] = await db.select().from(patchTokens).where(eq(patchTokens.id, id));
-    return token;
-  }
-
-  async getPatchTokenByToken(token: string): Promise<PatchToken | undefined> {
-    const [pt] = await db.select().from(patchTokens).where(eq(patchTokens.token, token));
-    return pt;
-  }
-
-  async createPatchToken(data: InsertPatchToken & { token: string }): Promise<PatchToken> {
-    const [pt] = await db.insert(patchTokens).values(data).returning();
-    return pt;
-  }
-
-  async updatePatchToken(id: string, data: Partial<PatchToken>): Promise<PatchToken | undefined> {
-    const [pt] = await db.update(patchTokens).set(data).where(eq(patchTokens.id, id)).returning();
-    return pt;
-  }
-
-  async deletePatchToken(id: string): Promise<void> {
-    await db.delete(patchTokens).where(eq(patchTokens.id, id));
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {

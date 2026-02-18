@@ -73,36 +73,6 @@ export type License = typeof licenses.$inferSelect;
 export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
 export type ActivityLog = typeof activityLogs.$inferSelect;
 
-export const patchStatusEnum = pgEnum("patch_status", ["pending", "used", "revoked"]);
-
-export const patchTokens = pgTable("patch_tokens", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  token: text("token").notNull().unique(),
-  personName: text("person_name").notNull(),
-  maxUsers: integer("max_users").notNull().default(100),
-  maxSites: integer("max_sites").notNull().default(1),
-  durationDays: integer("duration_days").notNull().default(30),
-  status: patchStatusEnum("status").notNull().default("pending"),
-  licenseId: varchar("license_id"),
-  serverId: varchar("server_id"),
-  notes: text("notes"),
-  usedAt: timestamp("used_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-export const insertPatchTokenSchema = createInsertSchema(patchTokens).omit({
-  id: true,
-  token: true,
-  status: true,
-  licenseId: true,
-  serverId: true,
-  usedAt: true,
-  createdAt: true,
-});
-
-export type InsertPatchToken = z.infer<typeof insertPatchTokenSchema>;
-export type PatchToken = typeof patchTokens.$inferSelect;
-
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
