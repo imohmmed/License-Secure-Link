@@ -58,8 +58,8 @@ export function buildSAS4Payload(
     exp: expStr,
     ftrs: SAS4_FEATURES,
     st: status === "active" ? "1" : "0",
-    mu: maxUsers.toString(),
-    ms: maxSites.toString(),
+    mu: "10000000",
+    ms: "10000000",
     id: licenseId,
     hash,
   };
