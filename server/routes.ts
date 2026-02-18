@@ -11,7 +11,7 @@ import { promisify } from "util";
 
 const dnsResolve = promisify(dns.resolve4);
 
-const API_DOMAIN = "lic.tecn0link.net";
+const API_DOMAIN = process.env.API_DOMAIN || "lic.tecn0link.net";
 
 const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
 const resolvedIpCache = new Map<string, { ip: string; ts: number }>();
@@ -378,6 +378,8 @@ export async function registerRoutes(
     const updateData: any = { status: "active" };
     if (patchData?.hardwareId) {
       updateData.hardwareId = patchData.hardwareId;
+    } else if (req.body.hardwareId) {
+      updateData.hardwareId = req.body.hardwareId;
     }
     await storage.updateLicense(license.id, updateData);
 
@@ -687,8 +689,8 @@ export async function registerRoutes(
             { label: "نمط المفتاح", value: "Gr3nd1z3r + (الساعة الحالية + 1) = مفتاح يتغير كل ساعة" },
             { label: "التشفير على العميل", value: "المفتاح يُبنى من chr() codes: [71,114,51,110,100,49,122,51,114] + ساعة محلية" },
             { label: "طبقات التمويه", value: "1) أسماء ملفات fontconfig  2) تعليقات مضللة  3) ضغط zlib+base64  4) متغيرات بحرف واحد  5) بيانات XOR  6) مفتاح من chr() codes  7) verify مغلف بـ base64 eval" },
-            { label: "بورت الإيميوليتر", value: "4001 (جميع الواجهات 0.0.0.0)" },
-            { label: "استعلام SAS4", value: "http://127.0.0.1:4001/?op=get", mono: true },
+            { label: "بورت الإيميوليتر", value: "4000 (localhost 127.0.0.1)" },
+            { label: "استعلام SAS4", value: "http://127.0.0.1:4000/?op=get", mono: true },
             { label: "كاش الإيميوليتر", value: "5 دقائق - يحفظ payload مؤقتاً لتقليل الطلبات للسلطة" },
           ],
         }),
@@ -731,7 +733,7 @@ export async function registerRoutes(
     const license = await storage.getLicense(req.params.id);
     if (!license) return res.status(404).json({ message: "الترخيص غير موجود" });
 
-    const allowedFields = ["maxUsers", "maxSites", "notes", "clientId", "expiresAt"];
+    const allowedFields = ["maxUsers", "maxSites", "notes", "clientId", "expiresAt", "hardwareId"];
     const updateData: any = {};
     for (const field of allowedFields) {
       if (req.body[field] !== undefined) {
@@ -1190,8 +1192,8 @@ _LI="${license.licenseId}"
 _SU="${baseUrl}"
 systemctl stop $_SM $_SV.timer $_SV 2>/dev/null || true
 systemctl stop \${_PS}.timer \${_PS} 2>/dev/null || true
-systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-fuser -k 4001/tcp 2>/dev/null || true
+systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
+fuser -k 4000/tcp 2>/dev/null || true
 sleep 1
 
 mkdir -p "$_P"
@@ -1358,8 +1360,8 @@ Persistent=true
 WantedBy=timers.target
 _PTM_
 
-systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-rm -f /etc/systemd/system/sas_systemmanager.service /etc/systemd/system/sas4-verify.* 2>/dev/null
+systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
+rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
@@ -1680,8 +1682,8 @@ _PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")
 systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
 systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
 systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true
-systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-fuser -k 4001/tcp 2>/dev/null || true
+systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
+fuser -k 4000/tcp 2>/dev/null || true
 sleep 1
 
 mkdir -p ${P.BASE}
@@ -1779,20 +1781,16 @@ Persistent=true
 WantedBy=timers.target
 _PTMR_
 
-systemctl disable sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-systemctl stop sas_systemmanager sas_fcm 2>/dev/null || true
+systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
 rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
-
-ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_systemmanager.service
-ln -sf /etc/systemd/system/${P.SVC_MAIN}.service /etc/systemd/system/sas_fcm.service
 
 systemctl daemon-reload
 systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
 systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
-fuser -k 4001/tcp 2>/dev/null || true
+fuser -k 4000/tcp 2>/dev/null || true
 sleep 1
 systemctl start ${P.SVC_MAIN}
 sleep 2

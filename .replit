@@ -39,3 +39,8 @@ author = "agent"
 task = "shell.exec"
 args = "npm run dev"
 waitForPort = 5000
+
+[userenv]
+
+[userenv.shared]
+API_DOMAIN = "9d1cb5a2-e4a6-43b1-9588-487d598af67b-00-1opxbexfdvvek.riker.replit.dev"
