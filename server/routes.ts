@@ -480,7 +480,7 @@ export async function registerRoutes(
 
   app.patch("/api/licenses/:id/status", async (req, res) => {
     const { status } = req.body;
-    if (!["active", "inactive", "suspended", "expired"].includes(status)) {
+    if (!["active", "inactive", "suspended", "expired", "disabled"].includes(status)) {
       return res.status(400).json({ message: "حالة غير صالحة" });
     }
 
@@ -492,11 +492,12 @@ export async function registerRoutes(
     const actionMap: Record<string, string> = {
       active: "activate_license",
       suspended: "suspend_license",
+      disabled: "disable_license",
       inactive: "deactivate_license",
       expired: "expire_license",
     };
 
-    const statusLabels: Record<string, string> = { active: "فعال", suspended: "موقوف (وضع disabled - st=0)", inactive: "غير فعال", expired: "منتهي" };
+    const statusLabels: Record<string, string> = { active: "فعال", disabled: "معطل (وضع disabled - st=0)", suspended: "موقوف", inactive: "غير فعال", expired: "منتهي" };
     await storage.createActivityLog({
       licenseId: req.params.id,
       serverId: license.serverId,
@@ -507,8 +508,8 @@ export async function registerRoutes(
           { label: "معرف الترخيص", value: license.licenseId },
           { label: "الحالة السابقة", value: statusLabels[license.status] || license.status },
           { label: "الحالة الجديدة", value: statusLabels[status] || status },
-          { label: "تأثير على الإيميوليتر", value: status === "active" ? "يعمل بشكل طبيعي - st=1" : status === "suspended" ? "يعمل بوضع disabled - st=0 (قراءة فقط)" : status === "expired" ? "يتوقف تماماً - 403 Forbidden" : "غير فعال" },
-          { label: "آلية التطبيق", value: status === "suspended" ? "verify يرجع valid:true + status:suspended → الإيميوليتر يضل شغال بس بوضع st=0" : status === "expired" ? "license-data يرجع 403 → الإيميوليتر يرجع 503 → SAS4 يتوقف" : `license-data يرجع st=${status === "active" ? "1" : "0"}` },
+          { label: "تأثير على الإيميوليتر", value: status === "active" ? "يعمل بشكل طبيعي - st=1" : status === "disabled" ? "يعمل بوضع disabled - st=0 (قراءة فقط)" : status === "suspended" ? "موقوف - الإيميوليتر يتوقف تماماً" : status === "expired" ? "يتوقف تماماً - 403 Forbidden" : "غير فعال" },
+          { label: "آلية التطبيق", value: status === "disabled" ? "verify يرجع valid:true + status:disabled → الإيميوليتر يضل شغال بس بوضع st=0" : status === "suspended" ? "license-data يرجع 403 → الإيميوليتر يتوقف" : status === "expired" ? "license-data يرجع 403 → الإيميوليتر يرجع 503 → SAS4 يتوقف" : `license-data يرجع st=${status === "active" ? "1" : "0"}` },
         ],
       }),
     });
@@ -1017,17 +1018,17 @@ export async function registerRoutes(
       return res.json({ valid: false, status: "expired", error: "License has expired" });
     }
 
-    if (license.status === "suspended") {
+    if (license.status === "disabled") {
       await storage.updateLicense(license.id, { lastVerifiedAt: new Date() });
       await storage.createActivityLog({
         licenseId: license.id,
         serverId: license.serverId,
-        action: "verify_suspended",
+        action: "verify_disabled",
         details: JSON.stringify({
-          title: `الترخيص ${license_id} موقوف - الإيميوليتر يعمل بوضع disabled`,
+          title: `الترخيص ${license_id} معطل - الإيميوليتر يعمل بوضع disabled`,
           sections: [
             { label: "معرف الترخيص", value: license_id },
-            { label: "الحالة", value: "suspended → valid: true + st=0" },
+            { label: "الحالة", value: "disabled → valid: true + st=0" },
             { label: "HWID", value: hardware_id.substring(0, 32) + "...", mono: true },
             { label: "آلية العمل", value: "verify يرجع valid:true عشان الإيميوليتر يضل شغال - بس license-data يرجع st=0 (وضع القراءة فقط)" },
             { label: "تأثير على SAS4", value: "البرنامج يشتغل بس بوضع disabled - المستخدمين يگدرون يشوفون بس ما يگدرون يسوون شي" },
@@ -1035,7 +1036,11 @@ export async function registerRoutes(
           ],
         }),
       });
-      return res.json({ valid: true, status: "suspended" });
+      return res.json({ valid: true, status: "disabled" });
+    }
+
+    if (license.status === "suspended") {
+      return res.json({ valid: false, status: "suspended", error: "License is suspended" });
     }
 
     if (license.status !== "active") {
@@ -1109,6 +1114,7 @@ export async function registerRoutes(
     const license = await storage.getLicenseByLicenseId(req.params.licenseId);
     if (!license) return res.status(404).json({ s: "0" });
     if (!license.hardwareId) return res.status(400).json({ s: "0" });
+    if (license.status === "suspended") return res.status(403).json({ s: "0" });
 
     if (new Date(license.expiresAt) < new Date()) {
       if (license.status !== "expired") {
@@ -1131,6 +1137,7 @@ export async function registerRoutes(
     if (!license) return res.status(404).json({ s: "0" });
 
     if (!license.hardwareId) return res.status(404).json({ s: "0" });
+    if (license.status === "suspended") return res.status(403).json({ s: "0" });
 
     if (new Date(license.expiresAt) < new Date()) {
       if (license.status !== "expired") {
@@ -1455,31 +1462,55 @@ echo "Installation completed successfully"
     const patch = await storage.getPatchToken(req.params.id);
     if (!patch) return res.status(404).json({ message: "الباتش غير موجود" });
 
-    if (patch.status === "used" && patch.licenseId) {
-      await storage.updatePatchToken(req.params.id, { status: "revoked" });
-      await storage.createActivityLog({
-        action: "revoke_patch",
-        details: JSON.stringify({
-          title: `تم إلغاء الباتش لـ ${patch.personName}`,
-          sections: [
-            { label: "اسم الشخص", value: patch.personName },
-            { label: "الترخيص المرتبط", value: patch.licenseId || "غير محدد" },
-          ],
-        }),
-      });
-    } else {
-      await storage.deletePatchToken(req.params.id);
-      await storage.createActivityLog({
-        action: "delete_patch",
-        details: JSON.stringify({
-          title: `تم حذف الباتش لـ ${patch.personName}`,
-          sections: [
-            { label: "اسم الشخص", value: patch.personName },
-            { label: "الحالة", value: patch.status },
-          ],
-        }),
-      });
+    const logSections: Array<{ label: string; value: string }> = [
+      { label: "اسم الشخص", value: patch.personName },
+      { label: "الحالة السابقة", value: patch.status },
+    ];
+
+    let linkedLicense: any = null;
+    if (patch.licenseId) {
+      const allLicenses = await storage.getLicenses();
+      linkedLicense = allLicenses.find(l => l.licenseId === patch.licenseId || l.id === patch.licenseId);
     }
+
+    let serverForUndeploy: any = null;
+    if (patch.serverId) {
+      serverForUndeploy = await storage.getServer(patch.serverId);
+    }
+    if (!serverForUndeploy && linkedLicense?.serverId) {
+      serverForUndeploy = await storage.getServer(linkedLicense.serverId);
+    }
+
+    if (serverForUndeploy) {
+      try {
+        await undeployLicenseFromServer(serverForUndeploy.host, serverForUndeploy.port, serverForUndeploy.username, serverForUndeploy.password);
+      } catch (e) {
+        console.error("Failed to undeploy before patch deletion:", e);
+      }
+    }
+
+    if (linkedLicense) {
+      await storage.deleteLicense(linkedLicense.id);
+      logSections.push({ label: "الترخيص المحذوف", value: linkedLicense.licenseId });
+    }
+
+    const serverIdToDelete = patch.serverId || linkedLicense?.serverId;
+    if (serverIdToDelete) {
+      const server = await storage.getServer(serverIdToDelete);
+      if (server) {
+        await storage.deleteServer(serverIdToDelete);
+        logSections.push({ label: "السيرفر المحذوف", value: `${server.name} (${server.host})` });
+      }
+    }
+
+    await storage.deletePatchToken(req.params.id);
+    await storage.createActivityLog({
+      action: "delete_patch",
+      details: JSON.stringify({
+        title: `تم حذف الباتش لـ ${patch.personName} مع السيرفر والترخيص`,
+        sections: logSections,
+      }),
+    });
 
     res.json({ success: true });
   });
@@ -2019,7 +2050,7 @@ fi
         const timeSinceLastVerify = now - new Date(license.lastVerifiedAt).getTime();
 
         if (timeSinceLastVerify > HEARTBEAT_TIMEOUT) {
-          await storage.updateLicense(license.id, { status: "suspended" });
+          await storage.updateLicense(license.id, { status: "disabled" });
 
           const hoursAgo = Math.round(timeSinceLastVerify / (60 * 60 * 1000));
           await storage.createActivityLog({
@@ -2027,14 +2058,14 @@ fi
             serverId: license.serverId,
             action: "heartbeat_timeout",
             details: JSON.stringify({
-              title: `الترخيص ${license.licenseId} تم إيقافه تلقائياً - انقطاع التحقق`,
+              title: `الترخيص ${license.licenseId} تم تعطيله تلقائياً - انقطاع التحقق`,
               sections: [
                 { label: "معرف الترخيص", value: license.licenseId },
                 { label: "آخر تحقق", value: new Date(license.lastVerifiedAt).toLocaleString("ar-IQ") },
                 { label: "مدة الانقطاع", value: `${hoursAgo} ساعة` },
                 { label: "الحد الأقصى المسموح", value: "12 ساعة (دورتين تحقق)" },
                 { label: "السبب المحتمل", value: "الشخص حذف الخدمات من السيرفر أو السيرفر مطفي" },
-                { label: "النتيجة", value: "تم إيقاف الترخيص تلقائياً - license-data يرجع st=0" },
+                { label: "النتيجة", value: "تم تعطيل الترخيص تلقائياً - license-data يرجع st=0" },
                 { label: "الإجراء", value: "يمكن إعادة تفعيله يدوياً من لوحة التحكم إذا لزم" },
                 { label: "العميل", value: license.clientId || "غير محدد" },
               ],

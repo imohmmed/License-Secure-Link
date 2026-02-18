@@ -94,7 +94,7 @@ export class DatabaseStorage implements IStorage {
 
   async getActiveLicenseByHwid(hwid: string): Promise<License | undefined> {
     const all = await db.select().from(licenses).where(eq(licenses.hardwareId, hwid));
-    const active = all.filter(l => l.status === "active" && new Date(l.expiresAt) > new Date());
+    const active = all.filter(l => (l.status === "active" || l.status === "disabled") && new Date(l.expiresAt) > new Date());
     if (active.length === 0) return undefined;
     active.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     return active[0];

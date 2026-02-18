@@ -3,7 +3,7 @@ import { pgTable, text, varchar, integer, boolean, timestamp, pgEnum } from "dri
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const licenseStatusEnum = pgEnum("license_status", ["active", "inactive", "suspended", "expired"]);
+export const licenseStatusEnum = pgEnum("license_status", ["active", "inactive", "suspended", "expired", "disabled"]);
 
 export const servers = pgTable("servers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

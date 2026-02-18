@@ -38,7 +38,8 @@ function StatusBadge({ status }: { status: string }) {
   const variants: Record<string, { label: string; className: string }> = {
     active: { label: "نشط", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 no-default-hover-elevate no-default-active-elevate" },
     inactive: { label: "غير نشط", className: "bg-muted text-muted-foreground no-default-hover-elevate no-default-active-elevate" },
-    suspended: { label: "موقوف", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate" },
+    disabled: { label: "معطل", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate" },
+    suspended: { label: "موقوف", className: "bg-red-500/15 text-red-600 dark:text-red-400 no-default-hover-elevate no-default-active-elevate" },
     expired: { label: "منتهي", className: "bg-red-500/15 text-red-600 dark:text-red-400 no-default-hover-elevate no-default-active-elevate" },
   };
   const v = variants[status] || variants.inactive;

@@ -34,6 +34,7 @@ const actionIcons: Record<string, React.ComponentType<{ className?: string }>> =
   create_license: Plus,
   activate_license: Play,
   suspend_license: Pause,
+  disable_license: Pause,
   delete_license: Trash2,
   extend_license: RefreshCw,
   transfer_license: ArrowRightLeft,
@@ -47,6 +48,7 @@ const actionIcons: Record<string, React.ComponentType<{ className?: string }>> =
   verify_success: CheckCircle2,
   verify_expired: XCircle,
   verify_suspended: Pause,
+  verify_disabled: Pause,
   verify_hwid_mismatch: AlertTriangle,
   edit_license: Eye,
   import_backup: RefreshCw,
@@ -57,6 +59,7 @@ function getActionLabel(action: string) {
     create_license: "إنشاء ترخيص",
     activate_license: "تفعيل ترخيص",
     suspend_license: "إيقاف ترخيص",
+    disable_license: "تعطيل ترخيص",
     expire_license: "انتهاء ترخيص",
     delete_license: "حذف ترخيص",
     extend_license: "تمديد ترخيص",
@@ -71,6 +74,7 @@ function getActionLabel(action: string) {
     verify_success: "تحقق ناجح",
     verify_expired: "ترخيص منتهي",
     verify_suspended: "ترخيص موقوف",
+    verify_disabled: "ترخيص معطل",
     verify_hwid_mismatch: "تحذير HWID",
     edit_license: "تعديل ترخيص",
     import_backup: "استيراد نسخة",
@@ -83,7 +87,7 @@ function getActionColor(action: string) {
   if (action.includes("delete") || action.includes("suspend") || action.includes("expired")) return "bg-red-500/15 text-red-600 dark:text-red-400";
   if (action.includes("create") || action.includes("activate") || action.includes("provision_license") || action.includes("verify_success")) return "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
   if (action.includes("transfer") || action.includes("deploy")) return "bg-blue-500/15 text-blue-600 dark:text-blue-400";
-  if (action.includes("verify_suspended")) return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
+  if (action.includes("verify_suspended") || action.includes("verify_disabled") || action.includes("disable")) return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
   return "bg-amber-500/15 text-amber-600 dark:text-amber-400";
 }
 

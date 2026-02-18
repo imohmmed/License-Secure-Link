@@ -58,7 +58,8 @@ function StatusBadge({ status }: { status: string }) {
   const variants: Record<string, { label: string; className: string }> = {
     active: { label: "نشط", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 no-default-hover-elevate no-default-active-elevate" },
     inactive: { label: "غير نشط", className: "bg-muted text-muted-foreground no-default-hover-elevate no-default-active-elevate" },
-    suspended: { label: "موقوف", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate" },
+    disabled: { label: "معطل", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400 no-default-hover-elevate no-default-active-elevate" },
+    suspended: { label: "موقوف", className: "bg-red-500/15 text-red-600 dark:text-red-400 no-default-hover-elevate no-default-active-elevate" },
     expired: { label: "منتهي", className: "bg-red-500/15 text-red-600 dark:text-red-400 no-default-hover-elevate no-default-active-elevate" },
   };
   const v = variants[status] || variants.inactive;
@@ -249,6 +250,7 @@ export default function Licenses() {
             <SelectItem value="all">الكل</SelectItem>
             <SelectItem value="active">نشط</SelectItem>
             <SelectItem value="inactive">غير نشط</SelectItem>
+            <SelectItem value="disabled">معطل</SelectItem>
             <SelectItem value="suspended">موقوف</SelectItem>
             <SelectItem value="expired">منتهي</SelectItem>
           </SelectContent>
@@ -316,7 +318,7 @@ export default function Licenses() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {license.status !== "active" && (
+                        {(license.status === "suspended" || license.status === "expired" || license.status === "inactive") && (
                           <DropdownMenuItem
                             onClick={() => updateStatusMutation.mutate({ id: license.id, status: "active" })}
                             data-testid={`action-activate-${license.id}`}
@@ -325,13 +327,13 @@ export default function Licenses() {
                             تفعيل
                           </DropdownMenuItem>
                         )}
-                        {license.status === "active" && (
+                        {(license.status === "active" || license.status === "disabled") && (
                           <DropdownMenuItem
-                            onClick={() => updateStatusMutation.mutate({ id: license.id, status: "suspended" })}
-                            data-testid={`action-suspend-${license.id}`}
+                            onClick={() => updateStatusMutation.mutate({ id: license.id, status: license.status === "active" ? "disabled" : "active" })}
+                            data-testid={`action-disable-${license.id}`}
                           >
-                            <Pause className="h-4 w-4 ml-2" />
-                            إيقاف
+                            {license.status === "active" ? <Pause className="h-4 w-4 ml-2" /> : <Play className="h-4 w-4 ml-2" />}
+                            {license.status === "active" ? "إيقاف" : "تفعيل"}
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuItem
@@ -378,14 +380,14 @@ export default function Licenses() {
                         <DropdownMenuItem
                           className="text-destructive focus:text-destructive"
                           onClick={() => {
-                            if (window.confirm(`هل أنت متأكد من حذف الترخيص ${license.licenseId} بالكامل؟ لا يمكن التراجع عن هذا الإجراء.`)) {
-                              deleteMutation.mutate(license.id);
+                            if (window.confirm(`هل أنت متأكد من حذف الترخيص ${license.licenseId}؟ سيتم إيقافه (موقوف).`)) {
+                              updateStatusMutation.mutate({ id: license.id, status: "suspended" });
                             }
                           }}
                           data-testid={`action-delete-${license.id}`}
                         >
                           <Trash2 className="h-4 w-4 ml-2" />
-                          حذف بالكامل
+                          حذف
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
