@@ -867,11 +867,25 @@ export async function registerRoutes(
       return res.status(404).json({ error: "License not found" });
     }
 
+    if (license.status === "suspended") {
+      return res.status(403).json({ error: "License is suspended", status: "suspended" });
+    }
+
     if (license.status === "expired" || new Date(license.expiresAt) < new Date()) {
       if (license.status !== "disabled") {
         await storage.updateLicense(license.id, { status: "disabled" });
       }
-      return res.status(403).json({ error: "License has expired", status: "disabled" });
+      const payload = buildSAS4Payload(
+        license.licenseId,
+        license.hardwareId || hardware_id,
+        new Date(license.expiresAt),
+        license.maxUsers,
+        license.maxSites,
+        "disabled"
+      );
+      const encrypted = encryptSAS4Payload(payload);
+      await storage.updateLicense(license.id, { signature: encrypted });
+      return res.json({ payload, encrypted, status: "disabled" });
     }
 
     if (license.hardwareId && license.hardwareId !== hardware_id) {
