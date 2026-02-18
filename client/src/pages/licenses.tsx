@@ -454,13 +454,19 @@ function CreateLicenseDialog({ open, onOpenChange, servers, availableClients, on
     setSelectedPatchId(patchId);
     const patch = availableClients.find((p) => p.id === patchId);
     if (patch) {
-      const matchIp = patch.activatedIp || patch.targetIp;
-      const matchingServer = matchIp ? servers.find((s) => s.host === matchIp) : undefined;
+      let matchedServerId = "";
+      if (patch.serverId) {
+        matchedServerId = patch.serverId;
+      } else {
+        const matchIp = patch.activatedIp || patch.targetIp;
+        const matchingServer = matchIp ? servers.find((s) => s.host === matchIp) : undefined;
+        if (matchingServer) matchedServerId = matchingServer.id;
+      }
       setForm((prev) => ({
         ...prev,
         clientId: patch.personName,
         licenseId: prev.licenseId || `LIC-${Date.now().toString(36).toUpperCase()}`,
-        serverId: matchingServer ? matchingServer.id : prev.serverId,
+        serverId: matchedServerId || prev.serverId,
       }));
     }
   };

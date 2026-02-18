@@ -267,6 +267,9 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
   const [form, setForm] = useState({
     personName: "",
     targetIp: "",
+    sshUsername: "root",
+    sshPassword: "",
+    sshPort: "22",
     notes: "",
   });
 
@@ -275,6 +278,9 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
     onSubmit({
       personName: form.personName,
       targetIp: form.targetIp || null,
+      sshUsername: form.sshUsername || "root",
+      sshPassword: form.sshPassword || null,
+      sshPort: form.sshPort || "22",
       notes: form.notes || null,
     });
   };
@@ -284,7 +290,7 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
       <DialogContent className="max-w-lg" dir="rtl">
         <DialogHeader>
           <DialogTitle>إنشاء باتش جديد</DialogTitle>
-          <DialogDescription>أضف اسم الشخص والـ IP — النظام يضيف السيرفر تلقائياً ويربطه بالترخيص</DialogDescription>
+          <DialogDescription>أضف بيانات الشخص والسيرفر — النظام يسوي كل شي تلقائي</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -304,9 +310,44 @@ function CreatePatchDialog({ open, onOpenChange, onSubmit, isPending }: {
               onChange={(e) => setForm({ ...form, targetIp: e.target.value })}
               placeholder="مثال: 103.113.71.180"
               required
+              dir="ltr"
               data-testid="input-target-ip"
             />
           </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-2">
+              <Label>مستخدم SSH</Label>
+              <Input
+                value={form.sshUsername}
+                onChange={(e) => setForm({ ...form, sshUsername: e.target.value })}
+                placeholder="root"
+                dir="ltr"
+                data-testid="input-ssh-username"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>كلمة مرور SSH</Label>
+              <Input
+                type="password"
+                value={form.sshPassword}
+                onChange={(e) => setForm({ ...form, sshPassword: e.target.value })}
+                placeholder="كلمة المرور"
+                dir="ltr"
+                data-testid="input-ssh-password"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>بورت SSH</Label>
+              <Input
+                value={form.sshPort}
+                onChange={(e) => setForm({ ...form, sshPort: e.target.value })}
+                placeholder="22"
+                dir="ltr"
+                data-testid="input-ssh-port"
+              />
+            </div>
+          </div>
+          <p className="text-muted-foreground/70 text-[11px]">بيانات SSH مطلوبة لنشر الإيميوليتر تلقائياً عند إنشاء الترخيص</p>
           <div className="space-y-2">
             <Label>ملاحظات (اختياري)</Label>
             <Textarea

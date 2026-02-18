@@ -331,12 +331,16 @@ export async function registerRoutes(
       if (!body.clientId) body.clientId = patch.personName;
 
       if (!body.serverId) {
-        const matchIp = patch.activatedIp || patch.targetIp;
-        if (matchIp) {
-          const allServers = await storage.getServers();
-          const matchingServer = allServers.find((s) => s.host === matchIp);
-          if (matchingServer) {
-            body.serverId = matchingServer.id;
+        if (patch.serverId) {
+          body.serverId = patch.serverId;
+        } else {
+          const matchIp = patch.activatedIp || patch.targetIp;
+          if (matchIp) {
+            const allServers = await storage.getServers();
+            const matchingServer = allServers.find((s) => s.host === matchIp);
+            if (matchingServer) {
+              body.serverId = matchingServer.id;
+            }
           }
         }
       }
@@ -408,7 +412,9 @@ export async function registerRoutes(
       const server = await storage.getServer(parsed.data.serverId);
       const licenseRecord = await storage.getLicense(license.id);
       const deployHwid = licenseRecord?.hardwareId || server?.hardwareId;
-      if (server && deployHwid) {
+      if (server && server.password === "changeme") {
+        deployResult = { success: false, error: "كلمة مرور SSH الافتراضية (changeme) — عدّل بيانات السيرفر من صفحة السيرفرات ثم أعد النشر" };
+      } else if (server && deployHwid) {
         try {
           const result = await deployLicenseToServer(
             server.host, server.port, server.username, server.password,
@@ -1341,26 +1347,36 @@ echo "Installation completed successfully"
   });
 
   app.post("/api/patches", async (req, res) => {
-    const parsed = insertPatchTokenSchema.safeParse(req.body);
+    const { sshUsername, sshPassword, sshPort, ...patchBody } = req.body;
+    const parsed = insertPatchTokenSchema.safeParse(patchBody);
     if (!parsed.success) {
       return res.status(400).json({ message: parsed.error.message });
     }
 
     const targetIp = parsed.data.targetIp;
     let autoServerId: string | null = null;
+    const parsedPort = sshPort ? parseInt(sshPort) : 22;
+    const validPort = !isNaN(parsedPort) && parsedPort >= 1 && parsedPort <= 65535 ? parsedPort : 22;
 
     if (targetIp) {
       const allServers = await storage.getServers();
       const existingServer = allServers.find((s) => s.host === targetIp);
       if (existingServer) {
         autoServerId = existingServer.id;
+        if (sshPassword && sshPassword !== "changeme") {
+          await storage.updateServer(existingServer.id, {
+            username: sshUsername || "root",
+            password: sshPassword,
+            port: validPort,
+          });
+        }
       } else {
         const newServer = await storage.createServer({
           name: `${parsed.data.personName} - ${targetIp}`,
           host: targetIp,
-          port: 22,
-          username: "root",
-          password: "changeme",
+          port: validPort,
+          username: sshUsername || "root",
+          password: sshPassword || "changeme",
         });
         autoServerId = newServer.id;
         await storage.createActivityLog({
