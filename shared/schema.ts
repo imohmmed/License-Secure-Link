@@ -61,6 +61,12 @@ export const insertLicenseSchema = createInsertSchema(licenses).omit({
   updatedAt: true,
 });
 
+export const insertLicenseWithHwidSchema = createInsertSchema(licenses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({
   id: true,
   createdAt: true,

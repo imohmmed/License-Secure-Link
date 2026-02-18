@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { testSSHConnection, deployLicenseToServer, undeployLicenseFromServer, generateObfuscatedEmulator, generateObfuscatedVerify, generatePatchDeployPayload, xorEncryptPayload, computeRemoteHWID, generateHwidBasedEmulator, generateHwidBasedVerify, DEPLOY } from "./ssh-service";
-import { insertServerSchema, insertLicenseSchema, insertPatchTokenSchema } from "@shared/schema";
+import { insertServerSchema, insertLicenseSchema, insertLicenseWithHwidSchema, insertPatchTokenSchema } from "@shared/schema";
 import { buildSAS4Payload, encryptSAS4Payload } from "./sas4-service";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
@@ -1800,9 +1800,9 @@ sleep 2
 if systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
   echo ""
   echo "========================================"
-  echo "  Installation complete!"
+  echo "  Installation & license activation complete!"
   echo "  Service is running."
-  echo "  Waiting for license activation..."
+  echo "  License is active and ready."
   echo "========================================"
   echo ""
 else
@@ -1877,6 +1877,24 @@ fi
 
     const serverHost = ip || req.ip || "unknown";
 
+    const existingActiveLicense = await storage.getActiveLicenseByHwid(hwid);
+    if (existingActiveLicense) {
+      await storage.updatePatchToken(patch.id, {
+        status: "used",
+        usedAt: new Date(),
+        activatedHostname: hostname || serverHost,
+        activatedIp: serverHost,
+        hardwareId: hwid,
+        rawHwidFingerprint: rawFingerprint,
+        licenseId: existingActiveLicense.id,
+      });
+      return res.json({
+        success: true,
+        message: "تم التسجيل — يوجد ترخيص فعال مسبقاً لهذا الجهاز",
+        licenseId: existingActiveLicense.licenseId,
+      });
+    }
+
     await storage.updatePatchToken(patch.id, {
       status: "used",
       usedAt: new Date(),
@@ -1886,24 +1904,62 @@ fi
       rawHwidFingerprint: rawFingerprint,
     });
 
+    const licenseId = `LIC-${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(2).toString("hex").toUpperCase()}`;
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + (patch.durationDays || 30));
+
+    const existingLicenseId = await storage.getLicenseByLicenseId(licenseId);
+    if (existingLicenseId) {
+      return res.status(500).json({ error: "تعارض في معرف الترخيص — أعد المحاولة" });
+    }
+
+    const licenseData = {
+      licenseId,
+      serverId: patch.serverId || null,
+      hardwareId: hwid,
+      status: "active" as const,
+      expiresAt,
+      maxUsers: patch.maxUsers || 100,
+      maxSites: patch.maxSites || 1,
+      clientId: patch.personName,
+      notes: `تم الإنشاء تلقائياً عبر الباتش`,
+    };
+
+    const parsedLicense = insertLicenseWithHwidSchema.safeParse(licenseData);
+    if (!parsedLicense.success) {
+      return res.status(500).json({ error: "خطأ في بيانات الترخيص: " + parsedLicense.error.message });
+    }
+
+    const license = await storage.createLicense(parsedLicense.data as any);
+
+    await storage.updatePatchToken(patch.id, {
+      licenseId: license.id,
+    });
+
     await storage.createActivityLog({
+      licenseId: license.id,
+      serverId: patch.serverId || null,
       action: "patch_activate",
       details: JSON.stringify({
-        title: `تم تسجيل العميل — ${patch.personName} بانتظار إنشاء الترخيص`,
+        title: `تم تسجيل وتفعيل ${patch.personName} تلقائياً`,
         sections: [
           { label: "اسم الشخص", value: patch.personName },
+          { label: "معرف الترخيص", value: licenseId },
           { label: "Hostname", value: hostname || "غير متوفر" },
           { label: "IP", value: serverHost },
           { label: "HWID", value: hwid, mono: true },
-          { label: "البصمة", value: rawFingerprint, mono: true },
-          { label: "الحالة", value: "تسجيل فقط — بانتظار إنشاء الترخيص من لوحة التحكم" },
+          { label: "الصلاحية", value: `${patch.durationDays || 30} يوم` },
+          { label: "أقصى مستخدمين", value: String(patch.maxUsers || 100) },
+          { label: "تاريخ الانتهاء", value: expiresAt.toLocaleString("ar-IQ") },
+          { label: "الحالة", value: "تم إنشاء الترخيص تلقائياً — الإيميوليتر سيكتشفه عبر HWID" },
         ],
       }),
     });
 
     res.json({
       success: true,
-      message: "تم التسجيل بنجاح — بانتظار إنشاء الترخيص",
+      message: "تم التسجيل وإنشاء الترخيص بنجاح",
+      licenseId,
     });
   });
 
