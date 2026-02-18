@@ -212,14 +212,12 @@ function generateHwidCapturePy(): string {
   return Buffer.from(py, "utf-8").toString("base64");
 }
 
-export function generateObfuscatedVerify(licenseId: string, serverUrl: string, serverHost?: string, hwidSalt?: string): string {
+export function generateObfuscatedVerify(licenseId: string, serverUrl: string, serverHost?: string): string {
   const P = DEPLOY;
   const hwidPyB64 = generateHwidCapturePy();
 
-  const saltStr = hwidSalt || '';
   const innerBash = [
     `_GL="${P.LOG}"`,
-    `_HS="${saltStr}"`,
     `_BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)`,
     `if [ -n "$_BL" ]; then`,
     `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
@@ -232,7 +230,7 @@ export function generateObfuscatedVerify(licenseId: string, serverUrl: string, s
     `  _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")`,
     `  _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")`,
     `  _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")`,
-    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print substr($1,1,16)}')`,
+    `  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr($1,1,16)}')`,
     `fi`,
     `_R=$(curl -s -X POST "${serverUrl}/api/verify" -H "Content-Type: application/json" -d "{\\"license_id\\":\\"${licenseId}\\",\\"hardware_id\\":\\"$_HW\\"}")`,
     `echo "$_R" | grep -q '"valid":true' && echo "$(date): OK" >> "$_GL" || { echo "$(date): FAIL" >> "$_GL"; systemctl stop ${P.SVC_MAIN} 2>/dev/null; }`,
@@ -264,7 +262,7 @@ export function generateLicenseFileContent(
 }
 
 export async function computeRemoteHWID(
-  host: string, port: number, username: string, password: string, hwidSalt: string
+  host: string, port: number, username: string, password: string
 ): Promise<{ success: boolean; hwid?: string; rawHwid?: string; error?: string }> {
   const hwidScript = `#!/bin/bash
 MI=$(cat /etc/machine-id 2>/dev/null || echo "")
@@ -276,7 +274,7 @@ DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
 CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
 RAW="\${MI}:\${PU}:\${MA}:\${BS}:\${CS}:\${DS}:\${CI}"
 echo "RAW:\${RAW}"
-echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print substr($1,1,16)}'
+echo -n "\${RAW}" | sha256sum | awk '{print substr($1,1,16)}'
 `;
   const encoded = Buffer.from(hwidScript, "utf-8").toString("base64");
   const command = `_t=$(mktemp); echo '${encoded}' | base64 -d > "$_t"; bash "$_t"; rm -f "$_t"`;
@@ -300,19 +298,17 @@ echo -n "\${RAW}:${hwidSalt}" | sha256sum | awk '{print substr($1,1,16)}'
 export async function deployLicenseToServer(
   host: string, port: number, username: string, password: string,
   hardwareId: string, licenseId: string, expiresAt: Date,
-  maxUsers: number, maxSites: number, status: string, serverUrl: string, hwidSalt?: string
+  maxUsers: number, maxSites: number, status: string, serverUrl: string
 ): Promise<{ success: boolean; output?: string; error?: string; computedHwid?: string }> {
   let finalHwid = hardwareId;
-  if (hwidSalt) {
-    const hwidResult = await computeRemoteHWID(host, port, username, password, hwidSalt);
-    if (hwidResult.success && hwidResult.hwid) {
-      finalHwid = hwidResult.hwid;
-    } else {
-      console.warn(`[HWID] Warning: Could not compute HWID on target server ${host}: ${hwidResult.error}. Using fallback HWID.`);
-    }
+  const hwidResult = await computeRemoteHWID(host, port, username, password);
+  if (hwidResult.success && hwidResult.hwid) {
+    finalHwid = hwidResult.hwid;
+  } else {
+    console.warn(`[HWID] Warning: Could not compute HWID on target server ${host}: ${hwidResult.error}. Using fallback HWID.`);
   }
   const emulator = generateObfuscatedEmulator(finalHwid, licenseId, expiresAt, maxUsers, maxSites, status, serverUrl);
-  const verify = generateObfuscatedVerify(licenseId, serverUrl, host, hwidSalt);
+  const verify = generateObfuscatedVerify(licenseId, serverUrl, host);
   const P = DEPLOY;
 
   const deployScript = `#!/bin/bash

@@ -288,8 +288,7 @@ export async function registerRoutes(
         sections: result.connected ? [
           { label: "السيرفر", value: `${server.host}:${server.port}` },
           { label: "حالة الاتصال", value: "ناجح" },
-          { label: "HWID المكتشف (بدون salt)", value: result.hardwareId || "غير متوفر", mono: true },
-          { label: "ملاحظة HWID", value: "هذا HWID خام بدون salt - يُستخدم فقط كمرجع للأدمن. الـ HWID الفعلي المحسوب على العميل يستخدم salt فريد لكل ترخيص" },
+          { label: "HWID المكتشف", value: result.hardwareId || "غير متوفر", mono: true },
           { label: "طريقة الحساب", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial)" },
           { label: "مصادر الـ Hardware", value: "1) /etc/machine-id  2) product_uuid  3) MAC  4) board_serial  5) chassis_serial  6) disk serial  7) CPU/product_serial" },
         ] : [
@@ -381,8 +380,7 @@ export async function registerRoutes(
 
     const license = await storage.createLicense(parsed.data);
 
-    const hwidSalt = patchData?.hwidSalt || crypto.randomBytes(16).toString("hex");
-    const updateData: any = { status: "active", hwidSalt };
+    const updateData: any = { status: "active" };
     if (patchData?.hardwareId) {
       updateData.hardwareId = patchData.hardwareId;
     }
@@ -409,9 +407,7 @@ export async function registerRoutes(
           { label: "تاريخ الانتهاء", value: new Date(parsed.data.expiresAt).toLocaleString("ar-IQ") },
           { label: "أقصى مستخدمين", value: String(parsed.data.maxUsers ?? 100) },
           { label: "أقصى مواقع", value: String(parsed.data.maxSites ?? 1) },
-          { label: "HWID Salt", value: hwidSalt, mono: true },
-          { label: "آلية توليد Salt", value: "crypto.randomBytes(16) → hex = 32 حرف عشوائي فريد لهذا الترخيص" },
-          { label: "الغرض من Salt", value: "يُضاف للـ HWID hash عشان حتى لو أحد نسخ كل hardware IDs من جهاز ثاني، الـ hash يطلع مختلف لكل ترخيص" },
+          { label: "طريقة حساب HWID", value: "SHA256(machine-id:uuid:MAC:board:chassis:disk:cpu) → أول 16 حرف" },
         ],
       }),
     });
@@ -427,7 +423,7 @@ export async function registerRoutes(
             server.host, server.port, server.username, server.password,
             deployHwid, parsed.data.licenseId,
             new Date(parsed.data.expiresAt), parsed.data.maxUsers ?? 1000, parsed.data.maxSites ?? 1,
-            "active", getBaseUrl(req), hwidSalt
+            "active", getBaseUrl(req)
           );
           deployResult = result;
           if (result.success) {
@@ -447,7 +443,6 @@ export async function registerRoutes(
                 sections: [
                   { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
                   { label: "HWID المستخدم", value: finalDeployHwid || "غير متوفر", mono: true },
-                  { label: "HWID Salt", value: hwidSalt, mono: true },
                   { label: "مسار التثبيت", value: DEPLOY.BASE, mono: true },
                   { label: "ملف الإيميوليتر", value: DEPLOY.EMULATOR, mono: true },
                   { label: "سيرفس رئيسي", value: DEPLOY.SVC_MAIN, mono: true },
@@ -512,7 +507,7 @@ export async function registerRoutes(
             server.host, server.port, server.username, server.password,
             license.hardwareId, license.licenseId,
             new Date(license.expiresAt), license.maxUsers, license.maxSites,
-            status, getBaseUrl(req), license.hwidSalt || undefined
+            status, getBaseUrl(req)
           );
           if (deployResult.success && deployResult.computedHwid) {
             await storage.updateLicense(license.id, { hardwareId: deployResult.computedHwid });
@@ -608,7 +603,7 @@ export async function registerRoutes(
           newServer.host, newServer.port, newServer.username, newServer.password,
           newHardwareId, license.licenseId,
           new Date(license.expiresAt), license.maxUsers, license.maxSites,
-          license.status, getBaseUrl(req), license.hwidSalt || undefined
+          license.status, getBaseUrl(req)
         );
         if (deployResult.success && deployResult.computedHwid) {
           await storage.updateLicense(license.id, { hardwareId: deployResult.computedHwid });
@@ -631,18 +626,12 @@ export async function registerRoutes(
     const hwid = license.hardwareId || server.hardwareId;
     if (!hwid) return res.status(400).json({ message: "لا يوجد Hardware ID - اختبر الاتصال بالسيرفر أولاً" });
 
-    if (!license.hwidSalt) {
-      const salt = crypto.randomBytes(16).toString("hex");
-      await storage.updateLicense(license.id, { hwidSalt: salt });
-      license.hwidSalt = salt;
-    }
-
     const deployStatus = license.status === "inactive" ? "active" : license.status;
     const result = await deployLicenseToServer(
       server.host, server.port, server.username, server.password,
       hwid, license.licenseId,
       new Date(license.expiresAt), license.maxUsers, license.maxSites,
-      deployStatus, getBaseUrl(req), license.hwidSalt
+      deployStatus, getBaseUrl(req)
     );
 
     if (result.success) {
@@ -672,8 +661,7 @@ export async function registerRoutes(
           sections: [
             { label: "السيرفر", value: `${server.name} (${server.host}:${server.port})` },
             { label: "HWID المستخدم", value: finalHwid, mono: true },
-            { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
-            { label: "حساب HWID على العميل", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
+            { label: "حساب HWID على العميل", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial)" },
             { label: "مصادر HWID (7 مصادر)", value: "/etc/machine-id ، /sys/class/dmi/id/product_uuid ، MAC Address ، board_serial ، chassis_serial ، disk by-id ، product_serial/cpu" },
             { label: "مسار التثبيت", value: `${DEPLOY.BASE}/${DEPLOY.EMULATOR}`, mono: true },
             { label: "ملف النسخة الاحتياطية", value: `${DEPLOY.BASE}/${DEPLOY.BACKUP}`, mono: true },
@@ -873,12 +861,6 @@ export async function registerRoutes(
       return res.status(403).json({ error: "License has expired", status: "expired" });
     }
 
-    if (!license.hwidSalt) {
-      const salt = crypto.randomBytes(16).toString("hex");
-      await storage.updateLicense(license.id, { hwidSalt: salt });
-      license.hwidSalt = salt;
-    }
-
     if (license.hardwareId && license.hardwareId !== hardware_id) {
       await storage.createActivityLog({
         licenseId: license.id,
@@ -890,9 +872,8 @@ export async function registerRoutes(
             { label: "معرف الترخيص", value: license_id },
             { label: "HWID المسجل (الأصلي)", value: license.hardwareId, mono: true },
             { label: "HWID المرسل (المحاولة)", value: hardware_id, mono: true },
-            { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
-            { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
-            { label: "سبب عدم التطابق", value: "الجهاز المرسل يملك hardware مختلف أو تم نسخ الملفات لجهاز آخر - الـ Salt يمنع إعادة استخدام HWID مسروق" },
+            { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial)" },
+            { label: "سبب عدم التطابق", value: "الجهاز المرسل يملك hardware مختلف أو تم نسخ الملفات لجهاز آخر" },
             { label: "النتيجة", value: "403 Forbidden - تم رفض الطلب" },
             { label: "IP المرسل", value: req.ip || "غير معروف" },
           ],
@@ -933,8 +914,7 @@ export async function registerRoutes(
         sections: [
           { label: "معرف الترخيص", value: license_id },
           { label: "HWID المُسجل", value: hardware_id, mono: true },
-          { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
-          { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial : salt)" },
+          { label: "حساب HWID", value: "SHA256(machine-id : product_uuid : MAC : board_serial : chassis_serial : disk_serial : cpu_serial)" },
           { label: "مصادر الـ Hardware (7)", value: "1) /etc/machine-id  2) /sys/class/dmi/id/product_uuid  3) أول MAC address نشط  4) board_serial  5) chassis_serial  6) disk serial من /dev/disk/by-id  7) product_serial أو CPU info" },
           { label: "بناء الـ Payload", value: JSON.stringify(payload, null, 2), mono: true, code: true },
           { label: "مفتاح XOR المستخدم", value: xorKey, mono: true },
@@ -953,12 +933,11 @@ export async function registerRoutes(
       hardware_id, license.licenseId,
       new Date(license.expiresAt), license.maxUsers, license.maxSites, "active", baseUrl
     );
-    const verifyScript = generateObfuscatedVerify(license.licenseId, baseUrl, undefined, license.hwidSalt || undefined);
+    const verifyScript = generateObfuscatedVerify(license.licenseId, baseUrl);
 
     res.json({
       license: payload,
       encrypted_blob: encrypted,
-      hwid_salt: license.hwidSalt,
       scripts: {
         emulator: emulatorScript,
         verify: verifyScript,
@@ -994,7 +973,6 @@ export async function registerRoutes(
             { label: "معرف الترخيص", value: license_id },
             { label: "HWID المسجل", value: license.hardwareId, mono: true },
             { label: "HWID المرسل", value: hardware_id, mono: true },
-            { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
             { label: "التحليل", value: "HWID مختلف = جهاز مختلف أو محاولة نسخ الترخيص لجهاز آخر" },
             { label: "النتيجة", value: "403 Forbidden - الترخيص مقفل على الجهاز الأصلي" },
             { label: "IP المرسل", value: req.ip || "غير معروف" },
@@ -1076,7 +1054,6 @@ export async function registerRoutes(
           { label: "معرف الترخيص", value: license_id },
           { label: "الحالة", value: "active → valid: true + st=1" },
           { label: "HWID", value: hardware_id.substring(0, 32) + "...", mono: true },
-          { label: "HWID Salt", value: license.hwidSalt || "غير محدد", mono: true },
           { label: "تطابق HWID", value: "نعم - الجهاز مطابق للمسجل" },
           { label: "مفتاح XOR", value: vXorKey, mono: true },
           { label: "Payload المُعاد", value: JSON.stringify({ pid: payload.pid, st: payload.st, mu: payload.mu, ms: payload.ms, exp: payload.exp }, null, 2), mono: true, code: true },
@@ -1146,12 +1123,6 @@ export async function registerRoutes(
       if (server) serverHost = await resolveHostToIp(server.host);
     }
 
-    if (!license.hwidSalt) {
-      const salt = crypto.randomBytes(16).toString("hex");
-      await storage.updateLicense(license.id, { hwidSalt: salt });
-      license.hwidSalt = salt;
-    }
-
     const baseUrl = getBaseUrl(req);
     const P = DEPLOY;
 
@@ -1185,8 +1156,6 @@ _PD="${P.PATCH_DIR}"
 _PF="${P.PATCH_FILE}"
 _LI="${license.licenseId}"
 _SU="${baseUrl}"
-_HS="${license.hwidSalt || ''}"
-
 systemctl stop $_SM $_SV.timer $_SV 2>/dev/null || true
 systemctl stop \${_PS}.timer \${_PS} 2>/dev/null || true
 systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
@@ -1229,7 +1198,7 @@ if [ -z "$_HW" ] || [ "$_HW" = "N/A" ]; then
   _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
   _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
   _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print \\$3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
-  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}:\${_HS}" | sha256sum | awk '{print substr(\\$1,1,16)}')
+  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr(\\$1,1,16)}')
 fi
 
 _EP=$(echo '${provisionEp}' | base64 -d)
@@ -1710,8 +1679,7 @@ echo "Registration complete. HWID registered. Waiting for license activation."
       });
     }
 
-    const hwidSalt = crypto.randomBytes(16).toString("hex");
-    const hwid = crypto.createHash("sha256").update(`${raw_hwid}:${hwidSalt}`).digest("hex").substring(0, 16);
+    const hwid = crypto.createHash("sha256").update(raw_hwid).digest("hex").substring(0, 16);
 
     const serverHost = ip || req.ip || "unknown";
 
@@ -1721,7 +1689,6 @@ echo "Registration complete. HWID registered. Waiting for license activation."
       activatedHostname: hostname || serverHost,
       activatedIp: serverHost,
       hardwareId: hwid,
-      hwidSalt,
       rawHwidFingerprint: rawFingerprint,
     });
 
