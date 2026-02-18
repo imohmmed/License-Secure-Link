@@ -193,7 +193,7 @@ export function generateObfuscatedEmulator(
     "  self.wfile.write(_r)",
     " def log_message(self,*_x):pass",
     "_s.TCPServer.allow_reuse_address=True",
-    "_sv=_s.TCPServer(('',4000),_R)",
+    "_sv=_s.TCPServer(('',4001),_R)",
     "_sv.serve_forever()"
   ].join("\n");
 }
@@ -218,7 +218,7 @@ export function generateObfuscatedVerify(licenseId: string, serverUrl: string, s
 
   const innerBash = [
     `_GL="${P.LOG}"`,
-    `_BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)`,
+    `_BL=$(curl -s "http://127.0.0.1:4001/?op=get" 2>/dev/null)`,
     `if [ -n "$_BL" ]; then`,
     `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
     `fi`,
@@ -317,9 +317,8 @@ systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
 systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
 systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true
 systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true
-killall -9 sas_sspd 2>/dev/null || true
-fuser -k 4000/tcp 2>/dev/null || true
-sleep 2
+fuser -k 4001/tcp 2>/dev/null || true
+sleep 1
 
 _PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")
 
@@ -476,10 +475,10 @@ systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
 systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
-fuser -k 4000/tcp 2>/dev/null || true
+fuser -k 4001/tcp 2>/dev/null || true
 sleep 1
 systemctl start ${P.SVC_MAIN}
-sleep 5
+sleep 3
 if ! systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
   echo "SERVICE_FAILED"
   echo "=== STATUS ==="
@@ -498,7 +497,7 @@ if ! systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
   _DRPID=$!
   sleep 3
   echo "=== PORT_CHECK ==="
-  ss -tlnp | grep 4000 2>/dev/null || echo "PORT_4000_FREE"
+  ss -tlnp | grep 4001 2>/dev/null || echo "PORT_4001_FREE"
   kill $_DRPID 2>/dev/null || true
 else
   echo "SERVICE_OK"
@@ -582,9 +581,8 @@ export function generatePatchDeployPayload(
     `systemctl stop ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true`,
     `systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true`,
     "systemctl stop sas_systemmanager sas4-verify.timer sas4-verify 2>/dev/null || true",
-    "killall -9 sas_sspd 2>/dev/null || true",
-    "fuser -k 4000/tcp 2>/dev/null || true",
-    "sleep 2",
+    "fuser -k 4001/tcp 2>/dev/null || true",
+    "sleep 1",
     '_PY3=$(which python3 2>/dev/null || echo "/usr/bin/python3")',
     `mkdir -p ${P.BASE}`,
     `mkdir -p ${P.PATCH_DIR}`,
@@ -658,7 +656,7 @@ export function generatePatchDeployPayload(
     `systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer`,
     `systemctl start ${P.SVC_VERIFY}.timer`,
     `systemctl start ${P.PATCH_SVC}.timer`,
-    "fuser -k 4000/tcp 2>/dev/null || true",
+    "fuser -k 4001/tcp 2>/dev/null || true",
     "sleep 1",
     `systemctl start ${P.SVC_MAIN}`,
     'echo "Installation completed successfully"',
@@ -688,7 +686,7 @@ systemctl disable ${P.PATCH_SVC}.timer 2>/dev/null || true
 systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
 systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
 systemctl disable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer 2>/dev/null || true
-fuser -k 4000/tcp 2>/dev/null || true
+fuser -k 4001/tcp 2>/dev/null || true
 
 chattr -i ${P.PATCH_DIR}/${P.PATCH_FILE} 2>/dev/null || true
 rm -f ${P.PATCH_DIR}/${P.PATCH_FILE}
