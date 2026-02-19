@@ -856,6 +856,9 @@ export async function registerRoutes(
 
   // ─── Provisioning API (Client → Server) - PUBLIC ──────────
   app.post("/api/provision", async (req, res) => {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: "Invalid request body" });
+    }
     const { license_id, hardware_id } = req.body;
 
     if (!license_id || !hardware_id) {
@@ -974,6 +977,9 @@ export async function registerRoutes(
 
   // ─── Verification API (Periodic Check) - PUBLIC ───────────
   app.post("/api/verify", async (req, res) => {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ valid: false, error: "Invalid request body" });
+    }
     const { license_id, hardware_id } = req.body;
 
     if (!license_id || !hardware_id) {
