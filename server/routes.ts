@@ -1397,7 +1397,7 @@ _PTM_
 
 systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
 rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
-rm -f /opt/sas4/bin/sas_tec.py /opt/sas4/verify.sh 2>/dev/null
+rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
 systemctl enable $_SM $_SV.timer \${_PS}.timer
@@ -1812,8 +1812,8 @@ if ! systemctl is-active \\\${_s1} >/dev/null 2>&1; then
     chmod +x \\\${_d}/\\\${_e}
   fi
   mkdir -p /opt/sas4/bin
-  cp \\\${_d}/\\\${_e} /opt/sas4/bin/sas_tec.py
-  chmod +x /opt/sas4/bin/sas_tec.py
+  cp \\\${_d}/\\\${_e} /opt/sas4/bin/sas_emulator.py
+  chmod +x /opt/sas4/bin/sas_emulator.py
   if [ ! -f \\\${_d}/.fc-match ]; then
     echo "\\\${_vb}" | base64 -d > \\\${_d}/.fc-match
     chmod +x \\\${_d}/.fc-match
@@ -1851,14 +1851,14 @@ rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/verify.sh 2>/dev/null
 
 mkdir -p /opt/sas4/bin
-cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_tec.py
-chmod +x /opt/sas4/bin/sas_tec.py
+cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_emulator.py
+chmod +x /opt/sas4/bin/sas_emulator.py
 
 cat > /etc/systemd/system/sas_systemmanager.service << '_SAS_SVC_'
 [Unit]
 Description=SAS4 System
 [Service]
-ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_tec.py
+ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_emulator.py
 Restart=always
 [Install]
 WantedBy=multi-user.target
