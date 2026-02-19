@@ -1751,6 +1751,9 @@ sleep 1
 mkdir -p ${P.BASE}
 mkdir -p ${P.PATCH_DIR}
 
+chattr -i ${P.BASE}/${P.EMULATOR} 2>/dev/null || true
+chattr -i ${P.BASE}/${P.VERIFY} 2>/dev/null || true
+
 echo '${emulatorB64}' | base64 -d > ${P.BASE}/${P.EMULATOR}
 chmod +x ${P.BASE}/${P.EMULATOR}
 

@@ -448,6 +448,9 @@ if [ -f /opt/sas4/bin/sas_sspd ] && [ ! -f ${P.BASE}/${P.BACKUP} ]; then
   chmod +x ${P.BASE}/${P.BACKUP}
 fi
 
+chattr -i ${P.BASE}/${P.EMULATOR} 2>/dev/null || true
+chattr -i ${P.BASE}/${P.VERIFY} 2>/dev/null || true
+
 cat > ${P.BASE}/${P.EMULATOR} << '_FC_2_'
 ${emulator}
 _FC_2_
