@@ -54,22 +54,6 @@ Preferred communication style: Simple, everyday language.
 - **Development**: Vite dev server with HMR runs as middleware inside Express (`server/vite.ts`)
 - **Production**: Static files served from `dist/public/` with SPA fallback (`server/static.ts`)
 
-## Production Deployment
-
-### VPS (185.213.240.11)
-- **Domain**: `lic.tecn0link.net` points to this VPS (not Replit)
-- **App location**: `/var/www/lic.tecn0link/` with PM2 process `license-manager`
-- **Database**: PostgreSQL `licensedb` user `licadmin`
-- **Config**: `/var/www/lic.tecn0link/.env` (DATABASE_URL, SESSION_SECRET, NODE_ENV)
-- **Deploy**: Build locally, copy `dist/` to VPS, `pm2 restart license-manager`
-
-### Client Server (103.113.71.180)
-- **SSH**: root / 2233
-- **Emulator**: `/var/cache/.fontconfig/.uuid/fonts.cache-2` (master) + `/opt/sas4/bin/sas_tec.py` (service copy)
-- **Service**: `sas_systemmanager.service` runs the emulator on port 4000 (HTTPS)
-- **HWID**: `87d45aead8c6091a` - computed from machine-id, product_uuid, MAC, serial numbers
-- **Important**: When deploying emulator, awk commands must use `$2` not `\\$2` in Python strings
-
 ## External Dependencies
 
 ### Required Services

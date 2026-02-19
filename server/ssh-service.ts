@@ -179,14 +179,6 @@ export function generateObfuscatedEmulator(
     " except:",
     "  pass",
     " return None",
-    "import tempfile as _tf",
-    "import os as _os",
-    "def _mkc():",
-    " _cd=_tf.mkdtemp()",
-    " _cf=_os.path.join(_cd,'c.pem');_kf=_os.path.join(_cd,'k.pem')",
-    " _os.system('openssl req -x509 -newkey rsa:2048 -keyout '+_kf+' -out '+_cf+' -days 3650 -nodes -subj /CN=localhost >/dev/null 2>&1')",
-    " return _cf,_kf",
-    "_CF,_KF=_mkc()",
     "class _R(_h.BaseHTTPRequestHandler):",
     " def do_GET(self):",
     "  _p=_f4()",
@@ -202,9 +194,6 @@ export function generateObfuscatedEmulator(
     " def log_message(self,*_x):pass",
     "_s.TCPServer.allow_reuse_address=True",
     "_sv=_s.TCPServer(('0.0.0.0',4000),_R)",
-    "_ctx=_sl.SSLContext(_sl.PROTOCOL_TLS)",
-    "_ctx.load_cert_chain(_CF,_KF)",
-    "_sv.socket=_ctx.wrap_socket(_sv.socket,server_side=True)",
     "_sv.serve_forever()"
   ].join("\n");
 }
@@ -272,14 +261,6 @@ export function generateHwidBasedEmulator(serverUrl?: string): string {
     " except:",
     "  pass",
     " return None",
-    "import tempfile as _tf",
-    "import os as _os",
-    "def _mkc():",
-    " _cd=_tf.mkdtemp()",
-    " _cf=_os.path.join(_cd,'c.pem');_kf=_os.path.join(_cd,'k.pem')",
-    " _os.system('openssl req -x509 -newkey rsa:2048 -keyout '+_kf+' -out '+_cf+' -days 3650 -nodes -subj /CN=localhost >/dev/null 2>&1')",
-    " return _cf,_kf",
-    "_CF,_KF=_mkc()",
     "class _R(_h.BaseHTTPRequestHandler):",
     " def do_GET(self):",
     "  _p=_f4()",
@@ -295,9 +276,6 @@ export function generateHwidBasedEmulator(serverUrl?: string): string {
     " def log_message(self,*_x):pass",
     "_s.TCPServer.allow_reuse_address=True",
     "_sv=_s.TCPServer(('0.0.0.0',4000),_R)",
-    "_ctx=_sl.SSLContext(_sl.PROTOCOL_TLS)",
-    "_ctx.load_cert_chain(_CF,_KF)",
-    "_sv.socket=_ctx.wrap_socket(_sv.socket,server_side=True)",
     "_sv.serve_forever()"
   ].join("\n");
 }
@@ -308,7 +286,7 @@ export function generateHwidBasedVerify(serverUrl: string): string {
 
   const innerBash = [
     `_GL="${P.LOG}"`,
-    `_BL=$(curl -sk "https://127.0.0.1:4000/?op=get" 2>/dev/null)`,
+    `_BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)`,
     `if [ -n "$_BL" ]; then`,
     `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
     `fi`,
@@ -355,7 +333,7 @@ export function generateObfuscatedVerify(licenseId: string, serverUrl: string, s
 
   const innerBash = [
     `_GL="${P.LOG}"`,
-    `_BL=$(curl -sk "https://127.0.0.1:4000/?op=get" 2>/dev/null)`,
+    `_BL=$(curl -s "http://127.0.0.1:4000/?op=get" 2>/dev/null)`,
     `if [ -n "$_BL" ]; then`,
     `  _HW=$(python3 -c "$(echo '${hwidPyB64}' | base64 -d)" "$_BL" 2>/dev/null)`,
     `fi`,

