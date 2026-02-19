@@ -1715,11 +1715,14 @@ command -v python3 &>/dev/null || { echo "python3 required"; exit 1; }
 command -v curl &>/dev/null || { echo "curl required"; exit 1; }
 _MI=$(cat /etc/machine-id 2>/dev/null || echo "")
 _PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
-_MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
+_MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}')
+[ -z "\${_MA}" ] && _MA=""
 _BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
 _CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
-_DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
-_CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
+_DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1)
+[ -z "\${_DS}" ] && _DS=""
+_CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}')
+[ -z "\${_CI}" ] && _CI=$(cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
 _RH="\${_MI}:\${_PU}:\${_MA}:\${_BS}:\${_CS}:\${_DS}:\${_CI}"
 _HN=$(hostname 2>/dev/null || echo "unknown")
 _IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")

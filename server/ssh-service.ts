@@ -382,11 +382,14 @@ export async function computeRemoteHWID(
   const hwidScript = `#!/bin/bash
 MI=$(cat /etc/machine-id 2>/dev/null || echo "")
 PU=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null || echo "")
-MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}' || echo "")
+MA=$(ip link show 2>/dev/null | grep -m1 'link/ether' | awk '{print $2}')
+[ -z "\${MA}" ] && MA=""
 BS=$(cat /sys/class/dmi/id/board_serial 2>/dev/null || echo "")
 CS=$(cat /sys/class/dmi/id/chassis_serial 2>/dev/null || echo "")
-DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1 || echo "")
-CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}' || cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
+DS=$(lsblk --nodeps -no serial 2>/dev/null | head -1)
+[ -z "\${DS}" ] && DS=""
+CI=$(grep -m1 'Serial' /proc/cpuinfo 2>/dev/null | awk '{print $3}')
+[ -z "\${CI}" ] && CI=$(cat /sys/class/dmi/id/product_serial 2>/dev/null || echo "")
 RAW="\${MI}:\${PU}:\${MA}:\${BS}:\${CS}:\${DS}:\${CI}"
 echo "RAW:\${RAW}"
 echo -n "\${RAW}" | sha256sum | awk '{print substr($1,1,16)}'
