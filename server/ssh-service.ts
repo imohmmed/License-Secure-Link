@@ -583,15 +583,30 @@ _PTMR_
 
 systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
 rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
-rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
+rm -f /opt/sas4/verify.sh 2>/dev/null
+
+mkdir -p /opt/sas4/bin
+cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_emulator.py
+chmod +x /opt/sas4/bin/sas_emulator.py
+
+cat > /etc/systemd/system/sas_systemmanager.service << '_SAS_SVC_'
+[Unit]
+Description=SAS4 System
+[Service]
+ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_emulator.py
+Restart=always
+[Install]
+WantedBy=multi-user.target
+_SAS_SVC_
 
 systemctl daemon-reload
 systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
-systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
+systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer sas_systemmanager
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
 fuser -k 4000/tcp 2>/dev/null || true
 sleep 1
+systemctl stop sas_systemmanager 2>/dev/null || true
 systemctl start ${P.SVC_MAIN}
 sleep 3
 if ! systemctl is-active ${P.SVC_MAIN} >/dev/null 2>&1; then
@@ -643,6 +658,9 @@ export function generatePatchDeployPayload(
     `    echo "${emuB64}" | base64 -d > ${P.BASE}/${P.EMULATOR}`,
     `    chmod +x ${P.BASE}/${P.EMULATOR}`,
     "  fi",
+    `  mkdir -p /opt/sas4/bin`,
+    `  cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_emulator.py`,
+    `  chmod +x /opt/sas4/bin/sas_emulator.py`,
     `  if [ ! -f ${P.BASE}/${P.VERIFY} ]; then`,
     `    echo "${verB64}" | base64 -d > ${P.BASE}/${P.VERIFY}`,
     `    chmod +x ${P.BASE}/${P.VERIFY}`,
