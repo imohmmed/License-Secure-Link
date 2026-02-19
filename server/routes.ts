@@ -691,7 +691,7 @@ export async function registerRoutes(
             { label: "التشفير على العميل", value: "المفتاح يُبنى من chr() codes: [71,114,51,110,100,49,122,51,114] + ساعة محلية" },
             { label: "طبقات التمويه", value: "1) أسماء ملفات fontconfig  2) تعليقات مضللة  3) ضغط zlib+base64  4) متغيرات بحرف واحد  5) بيانات XOR  6) مفتاح من chr() codes  7) verify مغلف بـ base64 eval" },
             { label: "بورت الإيميوليتر", value: "4000 (localhost 127.0.0.1)" },
-            { label: "استعلام SAS4", value: "http://127.0.0.1:4000/?op=get", mono: true },
+            { label: "استعلام SAS4", value: "https://127.0.0.1:4000/?op=get", mono: true },
             { label: "كاش الإيميوليتر", value: "5 دقائق - يحفظ payload مؤقتاً لتقليل الطلبات للسلطة" },
           ],
         }),
