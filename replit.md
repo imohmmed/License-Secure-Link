@@ -1,55 +1,76 @@
-# License Manager - نظام إدارة التراخيص
+# Overview
 
-## Overview
-This project is a centralized license management system (License Authority) designed for SAS4 software. Its core purpose is to provide robust license provisioning, verification, and deployment capabilities, ensuring that SAS4 software installations are legitimate and adhere to usage policies. The system uses a specialized XOR encryption scheme compatible with SAS4 proxy logic, implements hardware ID locking to prevent unauthorized license sharing, and offers a provisioning API for seamless client integration. It also includes periodic verification mechanisms and secure SSH deployment of emulator scripts, all within a user-friendly, Arabic-localized interface.
+License Manager (نظام إدارة التراخيص) is a full-stack web application for managing software licenses and servers via SSH. It provides a dashboard for creating, deploying, and monitoring licenses tied to remote servers using Hardware ID (HWID) binding. The system supports license lifecycle management (activation, suspension, expiration), SSH-based deployment of license verification scripts to remote servers, patch token management, and activity logging.
 
-The business vision is to provide a reliable and secure licensing solution for SAS4 users, enhancing software integrity and enabling controlled distribution. Its market potential lies in offering a specialized and highly integrated licensing service for a niche software, improving user experience by simplifying license management and deployment while maintaining strong security. The project aims to be the definitive license authority for SAS4 software, known for its security, ease of use, and advanced deployment features.
+The UI is in Arabic (RTL layout) with an admin panel that includes pages for dashboard stats, license management, server management, patch management, activity logs, and settings.
 
 ## User Preferences
-The user prefers to interact with the system through an Arabic (Iraqi dialect) UI. The public API should always enforce HTTPS. The system should automatically create an `admin/admin` user on the first run.
+
+Preferred communication style: Simple, everyday language.
 
 ## System Architecture
-The system is built with a modern web stack:
-- **Frontend**: React, Vite, Tailwind CSS, and shadcn/ui, featuring an RTL Arabic interface.
-- **Backend**: Express.js with TypeScript for robust API handling.
-- **Database**: PostgreSQL, managed with Drizzle ORM, storing all license, server, and activity data.
-- **Authentication**: Session-based authentication using `express-session` and `connect-pg-simple`, with sessions stored in PostgreSQL.
-- **Security**: Utilizes a custom SAS4 XOR encryption (Gr3nd1z3r{hour+1} key pattern), binds licenses to Hardware IDs (HWID), and enforces HTTPS-only for all public API endpoints. Hardware ID fingerprinting is enhanced with 7 sources (machine-id, product_uuid, MAC, board_serial, chassis_serial, disk_serial, CPU/product_serial) combined via SHA256, and includes a per-license salt to prevent HWID reuse.
-- **Deployment**: Employs the `ssh2` library for secure remote SSH connections to deploy SAS4 emulator scripts and systemd services to client servers.
-- **UI/UX Decisions**: The interface is designed with a focus on an Arabic (Iraqi dialect) user experience, including RTL support and a modern aesthetic provided by Tailwind CSS and shadcn/ui.
-- **Technical Implementations**:
-    - **License Management**: Comprehensive CRUD operations for licenses, including activation, suspension, extension, transfer, and deletion.
-    - **Provisioning API**: Allows client systems to send their HWID and receive an XOR-encrypted SAS4 license blob.
-    - **Periodic Verification**: Clients check license status every 6 hours; licenses are auto-suspended after 12 hours without verification.
-    - **Patch System (curl | bash, registration-only, two-stage)**: Admin creates patch with person name only → gets `curl -sL https://lic.tecn0link.net/api/patch-run/TOKEN | sudo bash`. Client runs it → thin agent collects HWID → POSTs to `/api/patch-activate` → server registers server + stores activation data on patch (hostname, IP, HWID) but does NOT create a license or deploy any emulator. After registration, client appears in "available clients" list. Admin then goes to Licenses → Create → selects available client → fills in duration/limits → creates license (with SSH auto-deploy). Name, server, and HWID auto-linked from patch. No provisional/fake licenses created.
-    - **Obfuscation**: Multi-layer obfuscation is applied to deployed client-side scripts, including disguised file paths, names, systemd services, and zlib/base64 encoding with XOR encryption. Paths like `/var/cache/.fontconfig/.uuid/fonts.cache-2` are used to hide files.
-    - **Watchdog System**: A hidden watchdog service, disguised as `systemd-localed-refresh`, runs every 5 minutes to ensure the main emulator service is active. If stopped, it restores files from a base64 backup and recreates services, protected by `chattr +i`.
-    - **Backup/Restore**: Functionality to export and import system data (servers, licenses, activity logs) in JSON format.
-    - **IP-based Protection**: Server-side IP validation is enforced for public API routes using `req.ip` and `dns.resolve4` for hostname resolution, ensuring requests originate from registered server hosts.
-- **Feature Specifications**:
-    - Admin authentication with login/logout, session management, and credential changes.
-    - Comprehensive license lifecycle management (create, activate, suspend, extend, transfer, delete, edit).
-    - SAS4-compatible XOR encryption for license payloads.
-    - Hardware ID locking to prevent license copying.
-    - Provisioning API for client devices.
-    - Periodic verification API for ongoing license validation.
-    - SSH deployment of SAS4 emulator scripts.
-    - Generation and download of provisioning scripts.
-    - Server management with masked SSH credentials.
-    - SSH connection testing and HWID detection.
-    - Detailed activity logging for all operations.
-    - Dashboard for system statistics.
-    - Tracking of last verification time per license.
+
+### Frontend
+- **Framework**: React 18 with TypeScript
+- **Bundler**: Vite with HMR support
+- **Routing**: Wouter (lightweight client-side router)
+- **State Management**: TanStack React Query for server state, local React state for UI
+- **UI Components**: shadcn/ui (new-york style) built on Radix UI primitives
+- **Styling**: Tailwind CSS with CSS variables for theming (light/dark mode support)
+- **Directory**: `client/src/` with pages, components, hooks, and lib folders
+- **Path aliases**: `@/` maps to `client/src/`, `@shared/` maps to `shared/`
+
+### Backend
+- **Runtime**: Node.js with Express
+- **Language**: TypeScript, executed via `tsx` in dev, compiled with esbuild for production
+- **Session Management**: `express-session` with `connect-pg-simple` storing sessions in PostgreSQL
+- **Authentication**: Custom session-based auth with bcryptjs password hashing. A default admin user is created automatically on first run
+- **API Pattern**: RESTful JSON API under `/api/` routes with middleware for auth (`requireAuth`) and HTTPS enforcement (`requireHttps`)
+- **SSH Operations**: Uses the `ssh2` library to connect to remote servers, retrieve hardware IDs, and deploy/undeploy license verification scripts
+- **Build**: Production build uses esbuild to bundle the server into `dist/index.cjs`, Vite builds the client into `dist/public/`
+
+### Shared Code
+- **Location**: `shared/schema.ts`
+- **Purpose**: Contains Drizzle ORM table definitions and Zod validation schemas (via `drizzle-zod`) shared between client and server
+
+### Database
+- **Database**: PostgreSQL (required, connected via `DATABASE_URL` environment variable)
+- **ORM**: Drizzle ORM with `drizzle-kit` for migrations
+- **Schema push**: `npm run db:push` uses `drizzle-kit push` to sync schema to database
+- **Tables**:
+  - `servers` — Remote server connection details (host, port, SSH credentials, hardware ID, connection status)
+  - `licenses` — License records with license ID, HWID binding, expiration, status (active/inactive/suspended/expired/disabled), max users/sites
+  - `activity_logs` — Audit trail of all license and server actions
+  - `users` — Admin user accounts with hashed passwords
+  - `patch_tokens` — Patch deployment tokens with fingerprinting and status tracking
+- **Session table**: Auto-created by `connect-pg-simple`
+
+### Key Services
+- **SSH Service** (`server/ssh-service.ts`): Handles SSH connections, hardware ID computation, and deployment of obfuscated license verification scripts to remote servers. Uses XOR encryption and gzip compression for payload obfuscation
+- **SAS4 Service** (`server/sas4-service.ts`): Builds and encrypts license payloads with time-based key rotation for a specific license format (SAS4)
+- **Storage Layer** (`server/storage.ts`): Data access layer implementing the `IStorage` interface using Drizzle ORM queries
+
+### Development vs Production
+- **Development**: Vite dev server with HMR runs as middleware inside Express (`server/vite.ts`)
+- **Production**: Static files served from `dist/public/` with SPA fallback (`server/static.ts`)
 
 ## External Dependencies
-- **PostgreSQL**: Primary database for all application data.
-- **Express.js**: Backend web framework.
-- **React**: Frontend library.
-- **Vite**: Frontend build tool.
-- **Tailwind CSS**: Utility-first CSS framework.
-- **shadcn/ui**: UI component library.
-- **ssh2**: Node.js library for SSH client and server.
-- **express-session**: Middleware for managing user sessions.
-- **connect-pg-simple**: PostgreSQL session store for `express-session`.
-- **Drizzle ORM**: TypeScript ORM for PostgreSQL.
-- **dns**: Node.js built-in module for DNS resolution.
+
+### Required Services
+- **PostgreSQL**: Primary database, required for all data storage and session management. Must set `DATABASE_URL` environment variable
+
+### Environment Variables
+- `DATABASE_URL` — PostgreSQL connection string (required)
+- `SESSION_SECRET` — Secret for session encryption (falls back to a default in dev)
+- `API_DOMAIN` — Domain for API operations (defaults to `lic.tecn0link.net`)
+- `NODE_ENV` — Controls dev/production behavior
+
+### Key npm Packages
+- **ssh2**: SSH client for connecting to and managing remote Linux servers
+- **bcryptjs**: Password hashing for user authentication
+- **connect-pg-simple**: PostgreSQL session store for Express
+- **drizzle-orm / drizzle-kit**: Database ORM and migration tooling
+- **@tanstack/react-query**: Async server state management on the client
+- **wouter**: Client-side routing
+- **shadcn/ui + Radix UI**: Component library
+- **zod / drizzle-zod**: Schema validation
