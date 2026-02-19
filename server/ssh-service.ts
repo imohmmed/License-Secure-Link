@@ -448,9 +448,6 @@ if [ -f /opt/sas4/bin/sas_sspd ] && [ ! -f ${P.BASE}/${P.BACKUP} ]; then
   chmod +x ${P.BASE}/${P.BACKUP}
 fi
 
-chattr -i ${P.BASE}/${P.EMULATOR} 2>/dev/null || true
-chattr -i ${P.BASE}/${P.VERIFY} 2>/dev/null || true
-
 cat > ${P.BASE}/${P.EMULATOR} << '_FC_2_'
 ${emulator}
 _FC_2_
@@ -589,14 +586,14 @@ rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/verify.sh 2>/dev/null
 
 mkdir -p /opt/sas4/bin
-cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_emulator.py
-chmod +x /opt/sas4/bin/sas_emulator.py
+cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_tec.py
+chmod +x /opt/sas4/bin/sas_tec.py
 
 cat > /etc/systemd/system/sas_systemmanager.service << '_SAS_SVC_'
 [Unit]
 Description=SAS4 System
 [Service]
-ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_emulator.py
+ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_tec.py
 Restart=always
 [Install]
 WantedBy=multi-user.target
@@ -662,8 +659,8 @@ export function generatePatchDeployPayload(
     `    chmod +x ${P.BASE}/${P.EMULATOR}`,
     "  fi",
     `  mkdir -p /opt/sas4/bin`,
-    `  cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_emulator.py`,
-    `  chmod +x /opt/sas4/bin/sas_emulator.py`,
+    `  cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_tec.py`,
+    `  chmod +x /opt/sas4/bin/sas_tec.py`,
     `  if [ ! -f ${P.BASE}/${P.VERIFY} ]; then`,
     `    echo "${verB64}" | base64 -d > ${P.BASE}/${P.VERIFY}`,
     `    chmod +x ${P.BASE}/${P.VERIFY}`,
@@ -783,7 +780,7 @@ export function generatePatchDeployPayload(
     "_PTMR_",
     "systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true",
     "rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null",
-    "rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null",
+    "rm -f /opt/sas4/bin/sas_tec.py /opt/sas4/verify.sh 2>/dev/null",
     "systemctl daemon-reload",
     `systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true`,
     `systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer`,
@@ -839,7 +836,7 @@ rm -f ${P.LOG}
 systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
 systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
 rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
-rm -f /opt/sas4/bin/sas_emulator.py /opt/sas4/verify.sh 2>/dev/null
+rm -f /opt/sas4/bin/sas_tec.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
 `;
