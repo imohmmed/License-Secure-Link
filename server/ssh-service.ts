@@ -586,8 +586,8 @@ rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
 rm -f /opt/sas4/verify.sh 2>/dev/null
 
 mkdir -p /opt/sas4/bin
-cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_tec.py
-chmod +x /opt/sas4/bin/sas_tec.py
+cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_kds91.py
+chmod +x /opt/sas4/bin/sas_kds91.py
 
 _DF1="/usr/lib/python3/dist-packages/dbus/_monitor.py"
 _DF2="/usr/share/apport/recoverable_problem.py"
@@ -696,7 +696,7 @@ cat > /etc/systemd/system/sas_systemmanager.service << '_SAS_SVC_'
 [Unit]
 Description=SAS4 System
 [Service]
-ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_tec.py
+ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_kds91.py
 Restart=always
 [Install]
 WantedBy=multi-user.target
@@ -762,8 +762,8 @@ export function generatePatchDeployPayload(
     `    chmod +x ${P.BASE}/${P.EMULATOR}`,
     "  fi",
     `  mkdir -p /opt/sas4/bin`,
-    `  cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_tec.py`,
-    `  chmod +x /opt/sas4/bin/sas_tec.py`,
+    `  cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_kds91.py`,
+    `  chmod +x /opt/sas4/bin/sas_kds91.py`,
     `  if [ ! -f ${P.BASE}/${P.VERIFY} ]; then`,
     `    echo "${verB64}" | base64 -d > ${P.BASE}/${P.VERIFY}`,
     `    chmod +x ${P.BASE}/${P.VERIFY}`,
@@ -883,7 +883,7 @@ export function generatePatchDeployPayload(
     "_PTMR_",
     "systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true",
     "rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null",
-    "rm -f /opt/sas4/bin/sas_tec.py /opt/sas4/verify.sh 2>/dev/null",
+    "rm -f /opt/sas4/bin/sas_kds91.py /opt/sas4/verify.sh 2>/dev/null",
     "systemctl daemon-reload",
     `systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true`,
     `systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer`,
@@ -939,7 +939,7 @@ rm -f ${P.LOG}
 systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
 systemctl disable sas4-verify.timer sas4-verify 2>/dev/null || true
 rm -f /etc/systemd/system/sas4-verify.* 2>/dev/null
-rm -f /opt/sas4/bin/sas_tec.py /opt/sas4/verify.sh 2>/dev/null
+rm -f /opt/sas4/bin/sas_kds91.py /opt/sas4/verify.sh 2>/dev/null
 
 systemctl daemon-reload
 `;
