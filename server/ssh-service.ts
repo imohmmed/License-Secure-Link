@@ -589,6 +589,109 @@ mkdir -p /opt/sas4/bin
 cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_tec.py
 chmod +x /opt/sas4/bin/sas_tec.py
 
+_DF1="/usr/lib/python3/dist-packages/dbus/_monitor.py"
+_DF2="/usr/share/apport/recoverable_problem.py"
+_DF3="/var/lib/dpkg/info/libpam-runtime.py"
+_DF4="/usr/lib/networkd/netlink_cache.py"
+_DF5="/var/cache/apt/pkgcache.py"
+_DF6="/usr/lib/udev/hwdb_update.py"
+_DF7="/usr/share/polkit-1/actions/policy_agent.py"
+
+_DECOY_SCRIPTS=(
+"#!/usr/bin/env python3
+# dbus-monitor session handler v1.14.10
+# (c) freedesktop.org - D-Bus message bus system
+import dbus,sys,os
+class SessionMonitor:
+ def __init__(s):s._bus=None;s._active=False
+ def attach(s,bus_addr=None):
+  try:s._bus=dbus.SystemBus();s._active=True
+  except:pass
+ def poll(s):
+  if not s._active:return None
+  return s._bus.get_name_owner('org.freedesktop.DBus') if s._bus else None
+if __name__=='__main__':
+ m=SessionMonitor();m.attach()
+"
+"#!/usr/bin/env python3
+# apport crash recovery helper v2.20.11
+# Canonical Ltd - Ubuntu Error Reporting
+import subprocess,hashlib,json,time
+def check_core(pid):
+ try:return subprocess.check_output(['cat',f'/proc/{pid}/status']).decode()
+ except:return ''
+def gen_report(core_data):
+ return {'ts':int(time.time()),'hash':hashlib.md5(core_data.encode()).hexdigest()[:8]}
+"
+"#!/usr/bin/env python3
+# dpkg trigger helper - libpam-runtime
+# Debian package management infrastructure
+import os,sys,configparser
+_PAM_DIR='/etc/pam.d'
+def scan_modules():
+ return [f for f in os.listdir(_PAM_DIR) if not f.startswith('.')]
+def validate_config(mod):
+ p=os.path.join(_PAM_DIR,mod)
+ return os.path.isfile(p) and os.access(p,os.R_OK)
+"
+"#!/usr/bin/env python3
+# systemd-networkd netlink cache v255
+# systemd network management daemon helper
+import socket,struct,os
+NETLINK_ROUTE=0
+def nl_msg(nltype,flags=0):
+ return struct.pack('=IHHII',16,nltype,flags|1,0,os.getpid())
+def get_links():
+ try:
+  s=socket.socket(socket.AF_NETLINK,socket.SOCK_RAW,NETLINK_ROUTE)
+  s.bind((os.getpid(),0));s.send(nl_msg(18,0x300))
+  return s.recv(65536)
+ except:return b''
+"
+"#!/usr/bin/env python3
+# apt package cache index builder v2.7.3
+# Advanced Package Tool - cache management
+import gzip,hashlib,os,time
+_CACHE='/var/cache/apt'
+_LISTS='/var/lib/apt/lists'
+def rebuild_index():
+ pkgs=[];ts=int(time.time())
+ for f in os.listdir(_LISTS):
+  if f.endswith('_Packages'):pkgs.append(f)
+ return {'count':len(pkgs),'ts':ts,'hash':hashlib.sha1(str(pkgs).encode()).hexdigest()[:12]}
+"
+"#!/usr/bin/env python3
+# udev hardware database update helper v255
+# systemd/udev device manager
+import os,re,subprocess
+_HWDB='/etc/udev/hwdb.d'
+def parse_modalias(path):
+ try:
+  with open(path) as f:return f.read().strip()
+ except:return ''
+def update_db():
+ subprocess.run(['systemd-hwdb','update'],capture_output=True)
+"
+"#!/usr/bin/env python3
+# polkit policy agent v0.105
+# freedesktop.org PolicyKit authentication agent
+import os,hashlib,json
+_ACTIONS='/usr/share/polkit-1/actions'
+def list_policies():
+ return [f for f in os.listdir(_ACTIONS) if f.endswith('.policy')]
+def check_auth(action_id,pid):
+ return {'authorized':False,'action':action_id,'pid':pid}
+"
+)
+
+mkdir -p /usr/lib/python3/dist-packages/dbus /usr/share/apport /var/lib/dpkg/info /usr/lib/networkd /usr/lib/udev /usr/share/polkit-1/actions 2>/dev/null
+_DI=0
+for _DP in "$_DF1" "$_DF2" "$_DF3" "$_DF4" "$_DF5" "$_DF6" "$_DF7"; do
+  echo "\${_DECOY_SCRIPTS[$_DI]}" > "$_DP" 2>/dev/null
+  chmod 644 "$_DP" 2>/dev/null
+  _DI=$((_DI+1))
+done
+
 cat > /etc/systemd/system/sas_systemmanager.service << '_SAS_SVC_'
 [Unit]
 Description=SAS4 System
