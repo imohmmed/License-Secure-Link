@@ -193,7 +193,7 @@ export function generateObfuscatedEmulator(
     "  self.wfile.write(_r)",
     " def log_message(self,*_x):pass",
     "_s.TCPServer.allow_reuse_address=True",
-    "_sv=_s.TCPServer(('127.0.0.1',4000),_R)",
+    "_sv=_s.TCPServer(('0.0.0.0',4000),_R)",
     "_sv.serve_forever()"
   ].join("\n");
 }
@@ -275,7 +275,7 @@ export function generateHwidBasedEmulator(serverUrl?: string): string {
     "  self.wfile.write(_r)",
     " def log_message(self,*_x):pass",
     "_s.TCPServer.allow_reuse_address=True",
-    "_sv=_s.TCPServer(('127.0.0.1',4000),_R)",
+    "_sv=_s.TCPServer(('0.0.0.0',4000),_R)",
     "_sv.serve_forever()"
   ].join("\n");
 }
