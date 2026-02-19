@@ -1860,24 +1860,17 @@ mkdir -p /opt/sas4/bin
 cp ${P.BASE}/${P.EMULATOR} /opt/sas4/bin/sas_tec.py
 chmod +x /opt/sas4/bin/sas_tec.py
 
-cat > /etc/systemd/system/sas_systemmanager.service << '_SAS_SVC_'
-[Unit]
-Description=SAS4 System
-[Service]
-ExecStart=/usr/bin/python3 /opt/sas4/bin/sas_tec.py
-Restart=always
-[Install]
-WantedBy=multi-user.target
-_SAS_SVC_
+systemctl stop sas_systemmanager 2>/dev/null || true
+systemctl disable sas_systemmanager 2>/dev/null || true
+rm -f /etc/systemd/system/sas_systemmanager.service 2>/dev/null
 
 systemctl daemon-reload
 systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
-systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer sas_systemmanager
+systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
 fuser -k 4000/tcp 2>/dev/null || true
 sleep 1
-systemctl stop sas_systemmanager 2>/dev/null || true
 systemctl start ${P.SVC_MAIN}
 sleep 2
 
