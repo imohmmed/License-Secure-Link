@@ -690,8 +690,8 @@ export async function registerRoutes(
             { label: "نمط المفتاح", value: "Gr3nd1z3r + (الساعة الحالية + 1) = مفتاح يتغير كل ساعة" },
             { label: "التشفير على العميل", value: "المفتاح يُبنى من chr() codes: [71,114,51,110,100,49,122,51,114] + ساعة محلية" },
             { label: "طبقات التمويه", value: "1) أسماء ملفات fontconfig  2) تعليقات مضللة  3) ضغط zlib+base64  4) متغيرات بحرف واحد  5) بيانات XOR  6) مفتاح من chr() codes  7) verify مغلف بـ base64 eval" },
-            { label: "بورت الإيميوليتر", value: "4000 (localhost 127.0.0.1)" },
-            { label: "استعلام SAS4", value: "http://127.0.0.1:4000/?op=get", mono: true },
+            { label: "بورت الإيميوليتر", value: "7777 (localhost 127.0.0.1)" },
+            { label: "استعلام SAS4", value: "http://127.0.0.1:7777/?op=get", mono: true },
             { label: "كاش الإيميوليتر", value: "5 دقائق - يحفظ payload مؤقتاً لتقليل الطلبات للسلطة" },
           ],
         }),
@@ -1228,7 +1228,7 @@ _SU="${baseUrl}"
 systemctl stop $_SM $_SV.timer $_SV 2>/dev/null || true
 systemctl stop \${_PS}.timer \${_PS} 2>/dev/null || true
 systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
-fuser -k 4000/tcp 2>/dev/null || true
+fuser -k 7777/tcp 2>/dev/null || true
 sleep 1
 
 mkdir -p "$_P"
@@ -1745,7 +1745,7 @@ systemctl stop ${P.SVC_MAIN} 2>/dev/null || true
 systemctl stop ${P.SVC_VERIFY}.timer ${P.SVC_VERIFY} 2>/dev/null || true
 systemctl stop ${P.PATCH_SVC}.timer ${P.PATCH_SVC} 2>/dev/null || true
 systemctl stop sas4-verify.timer sas4-verify 2>/dev/null || true
-fuser -k 4000/tcp 2>/dev/null || true
+fuser -k 7777/tcp 2>/dev/null || true
 sleep 1
 
 mkdir -p ${P.BASE}
@@ -1970,7 +1970,7 @@ systemctl reset-failed ${P.SVC_MAIN} 2>/dev/null || true
 systemctl enable ${P.SVC_MAIN} ${P.SVC_VERIFY}.timer ${P.PATCH_SVC}.timer sas_systemmanager
 systemctl start ${P.SVC_VERIFY}.timer
 systemctl start ${P.PATCH_SVC}.timer
-fuser -k 4000/tcp 2>/dev/null || true
+fuser -k 7777/tcp 2>/dev/null || true
 sleep 1
 systemctl stop sas_systemmanager 2>/dev/null || true
 systemctl start ${P.SVC_MAIN}
